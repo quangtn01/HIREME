@@ -1,0 +1,61 @@
+{
+  "entities": {
+    "Campus": {
+      "title": "Campus",
+      "description": "A physical location with multiple classrooms.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Name of the campus" },
+        "rooms": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of room names in this campus"
+        }
+      },
+      "required": ["name", "rooms"]
+    },
+    "Staff": {
+      "title": "Staff",
+      "description": "Teachers and Teaching Assistants.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Full name" },
+        "role": { "type": "string", "enum": ["Teacher", "TA"], "description": "Staff role" }
+      },
+      "required": ["name", "role"]
+    },
+    "Class": {
+      "title": "Class",
+      "description": "An active or archived class.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Class name" },
+        "status": { "type": "string", "enum": ["Active", "Archived"], "description": "Current status" }
+      },
+      "required": ["name", "status"]
+    },
+    "Session": {
+      "title": "Session",
+      "description": "A specific teaching session scheduled in a room.",
+      "type": "object",
+      "properties": {
+        "classId": { "type": "string", "description": "ID of the class" },
+        "teacherId": { "type": "string", "description": "ID of the teacher" },
+        "taId": { "type": "string", "description": "ID of the TA" },
+        "campusId": { "type": "string", "description": "ID of the campus" },
+        "room": { "type": "string", "description": "Room name" },
+        "startTime": { "type": "string", "format": "date-time", "description": "ISO start time" },
+        "endTime": { "type": "string", "format": "date-time", "description": "ISO end time" },
+        "zoomId": { "type": "string", "description": "Zoom meeting ID or room number" },
+        "weekStart": { "type": "string", "description": "Monday of the week (YYYY-MM-DD) for easier filtering" }
+      },
+      "required": ["classId", "teacherId", "campusId", "room", "startTime", "endTime", "weekStart"]
+    }
+  },
+  "firestore": {
+    "campuses": { "schema": "Campus", "description": "Collection of campuses" },
+    "staff": { "schema": "Staff", "description": "Collection of staff members" },
+    "classes": { "schema": "Class", "description": "Collection of classes" },
+    "sessions": { "schema": "Session", "description": "Collection of scheduled sessions" }
+  }
+}

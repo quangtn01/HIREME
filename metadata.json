@@ -1,0 +1,5 @@
+{
+  "name": "Hireme Center Schedule Management",
+  "description": "A comprehensive full-stack system for managing teaching schedules, campuses, staff, and classes with real-time Firebase integration.",
+  "requestFramePermissions": []
+}
