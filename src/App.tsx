@@ -26,6 +26,7 @@ import { db, auth } from './firebase';
 import { Campus, Staff, Class, Session } from './types';
 import { 
   LayoutDashboard, 
+  Grid,
   Settings, 
   Calendar, 
   Users, 
@@ -114,7 +115,7 @@ const SessionTimePicker = ({ startTime, endTime, onChange }: { startTime: string
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'scheduler' | 'staff' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'dashboard2' | 'scheduler' | 'staff' | 'settings'>('dashboard');
   const [campuses, setCampuses] = useState<Campus[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [classes, setClasses] = useState<Class[]>([]);
@@ -189,6 +190,7 @@ export default function App() {
         
         <nav className="flex-1 p-4 space-y-2">
           <NavItem icon={<LayoutDashboard size={18} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
+          <NavItem icon={<Grid size={18} />} label="Office View" active={activeTab === 'dashboard2'} onClick={() => setActiveTab('dashboard2')} />
           <NavItem icon={<Users size={18} />} label="Staff View" active={activeTab === 'staff'} onClick={() => setActiveTab('staff')} />
           <NavItem icon={<Calendar size={18} />} label="Scheduler" active={activeTab === 'scheduler'} onClick={() => setActiveTab('scheduler')} />
           <NavItem icon={<Settings size={18} />} label="Settings" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
@@ -210,9 +212,21 @@ export default function App() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto p-8">
+      <main className="flex-1 overflow-auto p-4">
         {activeTab === 'dashboard' && (
           <DashboardView 
+            campuses={campuses} 
+            sessions={sessions} 
+            staff={staff} 
+            classes={classes} 
+            onAddSession={(data) => {
+              setEditingSession(data);
+              setIsModalOpen(true);
+            }}
+          />
+        )}
+        {activeTab === 'dashboard2' && (
+          <Dashboard2View 
             campuses={campuses} 
             sessions={sessions} 
             staff={staff} 
@@ -445,6 +459,13 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-serif italic">Campus Dashboard</h1>
         <div className="flex items-center gap-4">
+          <Button 
+            onClick={() => onAddSession({})}
+            className="bg-emerald-600 text-white hover:bg-emerald-700 flex items-center gap-2"
+          >
+            <Plus size={18} />
+            New Session
+          </Button>
           <div className="flex items-center bg-white rounded-xl border border-black/5 p-1">
             <button onClick={() => setCurrentWeek(subWeeks(currentWeek, 1))} className="p-2 hover:bg-black/5 rounded-lg"><ChevronLeft size={16} /></button>
             <span className="px-4 text-sm font-medium">Week of {format(currentWeek, 'MMM d, yyyy')}</span>
@@ -457,15 +478,15 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
       </div>
 
       {campus && (
-        <div className="bg-white rounded-[32px] border border-black/5 overflow-hidden shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse">
-              <thead>
+        <div className="bg-white rounded-[32px] border border-black/5 shadow-sm overflow-hidden">
+          <div className="overflow-auto max-h-[calc(100vh-120px)]">
+            <table className="w-full border-separate border-spacing-0">
+              <thead className="sticky top-0 z-20">
                 <tr className="bg-black/5">
-                  <th className="p-4 border-r border-black/5 text-left text-[11px] uppercase tracking-wider text-black/40 font-mono w-24">Room</th>
-                  <th className="p-4 border-r border-black/5 text-left text-[11px] uppercase tracking-wider text-black/40 font-mono w-32">Slot</th>
+                  <th className="sticky top-0 left-0 z-30 bg-[#f8f8f8] p-4 border-r border-b border-black/5 text-left text-[11px] uppercase tracking-wider text-black/40 font-mono w-20 min-w-[80px] max-w-[80px]">Room</th>
+                  <th className="sticky top-0 left-[80px] z-20 bg-[#f8f8f8] p-4 border-r border-b border-black/5 text-left text-[11px] uppercase tracking-wider text-black/40 font-mono w-[100px] min-w-[100px] max-w-[100px]">Slot</th>
                   {weekDays.map(day => (
-                    <th key={day.toISOString()} className="p-4 border-r border-black/5 text-center min-w-[180px]">
+                    <th key={day.toISOString()} className="sticky top-0 bg-[#f8f8f8] p-4 border-r border-b border-black/5 text-center min-w-[140px]">
                       <p className="text-xs font-semibold">{format(day, 'EEEE')}</p>
                       <p className="text-[10px] text-black/40">{format(day, 'MMM d')}</p>
                     </th>
@@ -476,13 +497,13 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
                 {campus.rooms.map(room => (
                   <React.Fragment key={room}>
                     {SLOTS.map((slot, slotIdx) => (
-                      <tr key={`${room}-${slot.id}`} className={cn("border-t border-black/5", slotIdx === 0 ? "border-t-black/20 border-t-2" : "border-t-black/5")}>
+                      <tr key={`${room}-${slot.id}`}>
                         {slotIdx === 0 && (
-                          <td rowSpan={4} className="p-4 border-r border-black/5 font-mono text-sm bg-black/[0.02] align-middle text-center font-bold">
+                          <td rowSpan={4} className="sticky left-0 z-10 p-4 border-r border-b border-black/5 font-mono text-sm bg-[#fafafa] align-middle text-center font-bold w-20 min-w-[80px] max-w-[80px]">
                             {room}
                           </td>
                         )}
-                        <td className="p-2 border-r border-black/5 text-[10px] font-mono text-black/40 bg-black/[0.01] whitespace-nowrap align-middle">
+                        <td className="sticky left-[80px] z-10 p-2 border-r border-b border-black/5 text-[10px] font-mono text-black/40 bg-[#fcfcfc] whitespace-nowrap align-middle w-[100px] min-w-[100px] max-w-[100px]">
                           {slot.label}
                         </td>
                         {weekDays.map(day => {
@@ -496,7 +517,7 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
                           return (
                             <td 
                               key={day.toISOString()} 
-                              className="p-1 border-r border-black/5 align-middle h-16 cursor-pointer hover:bg-black/[0.02] transition-colors"
+                              className="p-1 border-r border-b border-black/5 align-middle h-16 cursor-pointer hover:bg-black/[0.02] transition-colors"
                               onDoubleClick={() => session ? onAddSession(session) : handleDoubleClick(day, slot, room)}
                             >
                               {session ? (
@@ -539,6 +560,120 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
 }
 
 // --- View: Scheduler ---
+
+function Dashboard2View({ campuses, sessions, staff, classes, onAddSession }: { 
+  campuses: Campus[], 
+  sessions: Session[], 
+  staff: Staff[], 
+  classes: Class[],
+  onAddSession: (data: Partial<Session>) => void
+}) {
+  const [selectedCampusId, setSelectedCampusId] = useState<string>(campuses[0]?.id || '');
+  const [currentWeek, setCurrentWeek] = useState(startOfWeek(new Date(), { weekStartsOn: 1 }));
+
+  const campus = campuses.find(c => c.id === selectedCampusId);
+  const weekDays = Array.from({ length: 7 }, (_, i) => addDays(currentWeek, i));
+
+  if (!campuses.length) return <EmptyState message="No campuses found. Please add one in Settings." />;
+
+  const getSlotLabel = (start: string) => {
+    if (start === '14:00') return 'CA CHIỀU 1';
+    if (start === '15:30') return 'CA CHIỀU 2';
+    if (start === '17:45') return 'CA TỐI 1';
+    if (start === '19:30') return 'CA TỐI 2';
+    return 'CA HỌC';
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-serif italic">Office View</h1>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center bg-white rounded-xl border border-black/5 p-1">
+            <button onClick={() => setCurrentWeek(subWeeks(currentWeek, 1))} className="p-2 hover:bg-black/5 rounded-lg"><ChevronLeft size={16} /></button>
+            <span className="px-4 text-sm font-medium">Week of {format(currentWeek, 'MMM d, yyyy')}</span>
+            <button onClick={() => setCurrentWeek(addWeeks(currentWeek, 1))} className="p-2 hover:bg-black/5 rounded-lg"><ChevronRight size={16} /></button>
+          </div>
+          <Select value={selectedCampusId} onChange={(e) => setSelectedCampusId(e.target.value)} className="w-48">
+            {campuses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </Select>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-[32px] border border-black/5 shadow-sm overflow-hidden">
+        <div className="overflow-auto max-h-[calc(100vh-120px)]">
+          <table className="w-full border-separate border-spacing-0">
+            <thead className="sticky top-0 z-20">
+              <tr className="bg-black/5">
+                <th className="sticky top-0 left-0 z-30 bg-[#f8f8f8] p-4 border-r border-b border-black/5 text-left text-[11px] uppercase tracking-wider text-black/40 font-mono w-40 min-w-[160px] max-w-[160px]">Ca học</th>
+                {weekDays.map(day => (
+                  <th key={day.toISOString()} className="sticky top-0 bg-[#f8f8f8] p-4 border-r border-b border-black/5 text-center min-w-[180px]">
+                    <p className="text-xs font-semibold">{format(day, 'EEEE')}</p>
+                    <p className="text-[10px] text-black/40">{format(day, 'MMM d')}</p>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {SLOTS.map((slot) => (
+                <tr key={slot.id}>
+                  <td className="sticky left-0 z-10 p-4 border-r border-b border-black/5 bg-[#fafafa] align-middle w-40 min-w-[160px] max-w-[160px]">
+                    <p className="font-bold text-sm text-black/80">{getSlotLabel(slot.start)}</p>
+                    <p className="text-[10px] text-black/40 font-mono mt-1 flex items-center gap-1">
+                      <Calendar size={10} />
+                      {slot.label}
+                    </p>
+                  </td>
+                  {weekDays.map(day => {
+                    const daySessions = sessions.filter(s => 
+                      s.campusId === selectedCampusId && 
+                      isSameDay(parseISO(s.startTime), day) &&
+                      format(parseISO(s.startTime), 'HH:mm') === slot.start
+                    );
+
+                    return (
+                      <td 
+                        key={day.toISOString()} 
+                        className="p-2 border-r border-b border-black/5 align-top min-h-[120px]"
+                      >
+                        <div className="space-y-2">
+                          {daySessions.map(session => (
+                            <div 
+                              key={session.id}
+                              onClick={() => onAddSession(session)}
+                              className="p-3 bg-emerald-50 border border-emerald-100 rounded-xl cursor-pointer hover:bg-emerald-50 transition-all hover:shadow-sm"
+                            >
+                              <p className="font-bold text-emerald-900 text-xs mb-1.5 uppercase tracking-tight">
+                                {classes.find(c => c.id === session.classId)?.name}
+                              </p>
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-1.5 text-[10px] text-emerald-700/70 font-medium">
+                                  <span className="w-3.5 h-3.5 flex items-center justify-center bg-emerald-100 rounded text-[8px]">🏢</span>
+                                  <span>Phòng {session.room}</span>
+                                </div>
+                                <div className="flex items-center gap-1.5 text-[10px] text-emerald-600/60">
+                                  <span className="w-3.5 h-3.5 flex items-center justify-center bg-emerald-100 rounded text-[8px]">👤</span>
+                                  <span className="truncate">{staff.find(st => st.id === session.teacherId)?.name}</span>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                          {daySessions.length === 0 && (
+                            <div className="h-12 w-full opacity-5" />
+                          )}
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function SchedulerView({ campuses, staff, classes, sessions, isModalOpen, setIsModalOpen, editingSession, setEditingSession }: { 
   campuses: Campus[], 
@@ -683,15 +818,15 @@ function StaffView({ staff, sessions, classes, campuses, onAddSession }: {
         </div>
       </div>
 
-      <div className="bg-white rounded-[32px] border border-black/5 overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse">
-            <thead>
+      <div className="bg-white rounded-[32px] border border-black/5 shadow-sm overflow-hidden">
+        <div className="overflow-auto max-h-[calc(100vh-120px)]">
+          <table className="w-full border-separate border-spacing-0">
+            <thead className="sticky top-0 z-20">
               <tr className="bg-black/5">
-                <th className="p-4 border-r border-black/5 text-left text-[11px] uppercase tracking-wider text-black/40 font-mono w-48">Staff Member</th>
-                <th className="p-4 border-r border-black/5 text-left text-[11px] uppercase tracking-wider text-black/40 font-mono w-32">Slot</th>
+                <th className="sticky top-0 left-0 z-30 bg-[#f8f8f8] p-4 border-r border-b border-black/5 text-left text-[11px] uppercase tracking-wider text-black/40 font-mono w-[150px] min-w-[150px] max-w-[150px]">Staff Member</th>
+                <th className="sticky top-0 left-[150px] z-20 bg-[#f8f8f8] p-4 border-r border-b border-black/5 text-left text-[11px] uppercase tracking-wider text-black/40 font-mono w-[100px] min-w-[100px] max-w-[100px]">Slot</th>
                 {weekDays.map(day => (
-                  <th key={day.toISOString()} className="p-4 border-r border-black/5 text-center min-w-[180px]">
+                  <th key={day.toISOString()} className="sticky top-0 bg-[#f8f8f8] p-4 border-r border-b border-black/5 text-center min-w-[140px]">
                     <p className="text-xs font-semibold">{format(day, 'EEEE')}</p>
                     <p className="text-[10px] text-black/40">{format(day, 'MMM d')}</p>
                   </th>
@@ -702,14 +837,14 @@ function StaffView({ staff, sessions, classes, campuses, onAddSession }: {
               {staff.sort((a, b) => a.name.localeCompare(b.name)).map(member => (
                 <React.Fragment key={member.id}>
                   {SLOTS.map((slot, slotIdx) => (
-                    <tr key={`${member.id}-${slot.id}`} className={cn("border-t border-black/5", slotIdx === 0 ? "border-t-black/20 border-t-2" : "border-t-black/5")}>
+                    <tr key={`${member.id}-${slot.id}`}>
                       {slotIdx === 0 && (
-                        <td rowSpan={4} className="p-4 border-r border-black/5 bg-black/[0.02] align-middle">
+                        <td rowSpan={4} className="sticky left-0 z-10 p-4 border-r border-b border-black/5 bg-[#fafafa] align-middle w-[150px] min-w-[150px] max-w-[150px]">
                           <p className="font-bold text-sm">{member.name}</p>
                           <p className="text-[10px] text-black/40 uppercase tracking-widest">{member.role}</p>
                         </td>
                       )}
-                      <td className="p-2 border-r border-black/5 text-[10px] font-mono text-black/40 bg-black/[0.01] whitespace-nowrap align-middle">
+                      <td className="sticky left-[150px] z-10 p-2 border-r border-b border-black/5 text-[10px] font-mono text-black/40 bg-[#fcfcfc] whitespace-nowrap align-middle w-[100px] min-w-[100px] max-w-[100px]">
                         {slot.label}
                       </td>
                       {weekDays.map(day => {
@@ -722,19 +857,18 @@ function StaffView({ staff, sessions, classes, campuses, onAddSession }: {
                         return (
                           <td 
                             key={day.toISOString()} 
-                            className="p-1 border-r border-black/5 align-middle h-16 cursor-pointer hover:bg-black/[0.02] transition-colors"
-                            onDoubleClick={() => session ? onAddSession(session) : handleDoubleClick(day, slot, member.id)}
+                            className="p-1 border-r border-b border-black/5 align-middle h-16 transition-colors"
                           >
                             {session ? (
-                              <div className="p-2 bg-black/5 border border-black/5 rounded-xl h-full flex flex-col justify-center overflow-hidden">
-                                <p className="font-bold text-black/90 leading-tight mb-0.5 text-xs">
+                              <div className="p-2 bg-emerald-50 border border-emerald-100 rounded-xl h-full flex flex-col justify-center overflow-hidden">
+                                <p className="font-bold text-emerald-900 leading-tight mb-0.5 text-xs">
                                   {classes.find(c => c.id === session.classId)?.name}
                                 </p>
-                                <p className="text-[10px] text-black/60 font-medium truncate">
+                                <p className="text-[10px] text-emerald-700/70 font-medium truncate">
                                   {campuses.find(c => c.id === session.campusId)?.name} - {session.room}
                                 </p>
                                 {session.notes && (
-                                  <p className="text-[8px] text-black/40 italic truncate mt-0.5 border-t border-black/10 pt-0.5">
+                                  <p className="text-[8px] text-emerald-600 italic truncate mt-0.5 border-t border-emerald-200/50 pt-0.5">
                                     {session.notes}
                                   </p>
                                 )}
@@ -826,7 +960,7 @@ function SettingsView({ campuses, staff, classes }: { campuses: Campus[], staff:
             {newCampus.id && <Button onClick={() => setNewCampus({ name: '', rooms: '' })} className="bg-black/5 hover:bg-black/10">Cancel</Button>}
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {campuses.map(c => (
+            {[...campuses].sort((a, b) => a.name.localeCompare(b.name)).map(c => (
               <div key={c.id} className="p-4 bg-black/5 rounded-2xl flex justify-between items-start">
                 <div>
                   <p className="font-bold">{c.name}</p>
@@ -861,7 +995,7 @@ function SettingsView({ campuses, staff, classes }: { campuses: Campus[], staff:
             {newStaff.id && <Button onClick={() => setNewStaff({ name: '', role: 'Teacher' })} className="bg-black/5 hover:bg-black/10">Cancel</Button>}
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-            {staff.map(s => (
+            {[...staff].sort((a, b) => a.name.localeCompare(b.name)).map(s => (
               <div key={s.id} className="p-4 bg-black/5 rounded-2xl flex justify-between items-center">
                 <div>
                   <p className="font-bold text-sm">{s.name}</p>
@@ -892,7 +1026,7 @@ function SettingsView({ campuses, staff, classes }: { campuses: Campus[], staff:
             {newClass.id && <Button onClick={() => setNewClass({ name: '' })} className="bg-black/5 hover:bg-black/10">Cancel</Button>}
           </div>
           <div className="space-y-2">
-            {classes.map(c => (
+            {[...classes].sort((a, b) => a.name.localeCompare(b.name)).map(c => (
               <div key={c.id} className={cn("p-4 rounded-2xl flex justify-between items-center", c.status === 'Active' ? 'bg-black/5' : 'bg-black/[0.02] opacity-50')}>
                 <div>
                   <p className="font-bold text-sm">{c.name}</p>
