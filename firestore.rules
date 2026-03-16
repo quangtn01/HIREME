@@ -29,6 +29,24 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Programs
+    match /programs/{programId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Job Titles
+    match /jobTitles/{jobTitleId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Departments
+    match /departments/{departmentId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
     // Sessions
     match /sessions/{sessionId} {
       allow read: if isAuthenticated();

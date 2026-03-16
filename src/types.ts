@@ -6,14 +6,62 @@ export interface Campus {
 
 export interface Staff {
   id: string;
+  staffId: string; // NV001, NV002...
   name: string;
-  role: 'Teacher' | 'TA';
+  jobTitleIds: string[];
+  departmentIds: string[];
+  status: 'Working' | 'Resigned';
+  gender?: 'Male' | 'Female' | 'Other';
+  birthDate?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  citizenId?: string;
+  citizenIdDate?: string;
+  socialInsuranceId?: string;
+  healthInsuranceId?: string;
+  childrenCount?: number;
+  emergencyContact?: string;
+  degrees?: string;
+  certificates?: string;
+  bankAccount?: string;
+  bankName?: string;
+}
+
+export interface ScheduleItem {
+  dayOfWeek: number; // 0-6 (Sunday-Saturday)
+  campusId: string;
+  room: string;
+  slot: string;
 }
 
 export interface Class {
   id: string;
   name: string;
+  programId: string;
   status: 'Active' | 'Archived';
+  teacherId: string;
+  taId?: string;
+  startDate: string; // YYYY-MM-DD
+  endDate: string;   // YYYY-MM-DD
+  tuitionFull?: number;
+  tuitionMonthly?: number;
+  schedule: ScheduleItem[];
+}
+
+export interface Program {
+  id: string;
+  name: string;
+}
+
+export interface JobTitle {
+  id: string;
+  name: string;
+}
+
+export interface Department {
+  id: string;
+  name: string;
 }
 
 export interface Session {

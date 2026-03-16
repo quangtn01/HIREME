@@ -23,7 +23,7 @@ import {
   User 
 } from 'firebase/auth';
 import { db, auth } from './firebase';
-import { Campus, Staff, Class, Session } from './types';
+import { Campus, Staff, Class, Session, Program, ScheduleItem, JobTitle, Department } from './types';
 import { 
   LayoutDashboard, 
   Grid,
@@ -34,9 +34,15 @@ import {
   Trash2, 
   ChevronLeft, 
   ChevronRight, 
+  ChevronDown,
+  ChevronUp,
   Copy,
   LogOut,
-  UserCircle
+  UserCircle,
+  BookOpen,
+  GraduationCap,
+  Briefcase,
+  Building2
 } from 'lucide-react';
 import { format, startOfWeek, addDays, parseISO, isSameDay, addWeeks, subWeeks, addMinutes } from 'date-fns';
 import { clsx, type ClassValue } from 'clsx';
@@ -115,10 +121,14 @@ const SessionTimePicker = ({ startTime, endTime, onChange }: { startTime: string
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'dashboard2' | 'scheduler' | 'staff' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'dashboard2' | 'scheduler' | 'staff' | 'course' | 'teacher' | 'management'>('dashboard');
+  const [isTimetableOpen, setIsTimetableOpen] = useState(true);
   const [campuses, setCampuses] = useState<Campus[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [classes, setClasses] = useState<Class[]>([]);
+  const [programs, setPrograms] = useState<Program[]>([]);
+  const [jobTitles, setJobTitles] = useState<JobTitle[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -144,6 +154,15 @@ export default function App() {
     const unsubClasses = onSnapshot(collection(db, 'classes'), (snap) => {
       setClasses(snap.docs.map(d => ({ id: d.id, ...d.data() } as Class)));
     });
+    const unsubPrograms = onSnapshot(collection(db, 'programs'), (snap) => {
+      setPrograms(snap.docs.map(d => ({ id: d.id, ...d.data() } as Program)));
+    });
+    const unsubJobTitles = onSnapshot(collection(db, 'jobTitles'), (snap) => {
+      setJobTitles(snap.docs.map(d => ({ id: d.id, ...d.data() } as JobTitle)));
+    });
+    const unsubDepartments = onSnapshot(collection(db, 'departments'), (snap) => {
+      setDepartments(snap.docs.map(d => ({ id: d.id, ...d.data() } as Department)));
+    });
     const unsubSessions = onSnapshot(collection(db, 'sessions'), (snap) => {
       setSessions(snap.docs.map(d => ({ id: d.id, ...d.data() } as Session)));
     });
@@ -152,6 +171,9 @@ export default function App() {
       unsubCampuses();
       unsubStaff();
       unsubClasses();
+      unsubPrograms();
+      unsubJobTitles();
+      unsubDepartments();
       unsubSessions();
     };
   }, [user]);
@@ -189,11 +211,31 @@ export default function App() {
         </div>
         
         <nav className="flex-1 p-4 space-y-2">
-          <NavItem icon={<LayoutDashboard size={18} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
-          <NavItem icon={<Grid size={18} />} label="Office View" active={activeTab === 'dashboard2'} onClick={() => setActiveTab('dashboard2')} />
-          <NavItem icon={<Users size={18} />} label="Staff View" active={activeTab === 'staff'} onClick={() => setActiveTab('staff')} />
-          <NavItem icon={<Calendar size={18} />} label="Scheduler" active={activeTab === 'scheduler'} onClick={() => setActiveTab('scheduler')} />
-          <NavItem icon={<Settings size={18} />} label="Settings" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
+          <div>
+            <button 
+              onClick={() => setIsTimetableOpen(!isTimetableOpen)}
+              className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-bold text-black/40 hover:bg-black/5 transition-all uppercase tracking-wider"
+            >
+              <div className="flex items-center gap-3">
+                <Calendar size={18} />
+                Timetable
+              </div>
+              {isTimetableOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </button>
+            
+            {isTimetableOpen && (
+              <div className="mt-1 ml-4 space-y-1 border-l-2 border-black/5 pl-2">
+                <NavItem icon={<LayoutDashboard size={16} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
+                <NavItem icon={<Grid size={16} />} label="Office View" active={activeTab === 'dashboard2'} onClick={() => setActiveTab('dashboard2')} />
+                <NavItem icon={<Users size={16} />} label="Staff View" active={activeTab === 'staff'} onClick={() => setActiveTab('staff')} />
+                <NavItem icon={<Calendar size={16} />} label="Scheduler" active={activeTab === 'scheduler'} onClick={() => setActiveTab('scheduler')} />
+              </div>
+            )}
+          </div>
+
+          <NavItem icon={<BookOpen size={18} />} label="Course" active={activeTab === 'course'} onClick={() => setActiveTab('course')} />
+          <NavItem icon={<Users size={18} />} label="Teacher" active={activeTab === 'teacher'} onClick={() => setActiveTab('teacher')} />
+          <NavItem icon={<Settings size={18} />} label="Management" active={activeTab === 'management'} onClick={() => setActiveTab('management')} />
         </nav>
 
         <div className="p-4 border-t border-black/5">
@@ -255,13 +297,33 @@ export default function App() {
             sessions={sessions} 
             classes={classes} 
             campuses={campuses} 
+            jobTitles={jobTitles}
             onAddSession={(data) => {
               setEditingSession(data);
               setIsModalOpen(true);
             }}
           />
         )}
-        {activeTab === 'settings' && <SettingsView campuses={campuses} staff={staff} classes={classes} />}
+        {activeTab === 'course' && (
+          <CourseView classes={classes} programs={programs} staff={staff} campuses={campuses} jobTitles={jobTitles} />
+        )}
+        {activeTab === 'teacher' && (
+          <TeacherView 
+            staff={staff} 
+            jobTitles={jobTitles} 
+            departments={departments} 
+            classes={classes} 
+            sessions={sessions} 
+          />
+        )}
+        {activeTab === 'management' && (
+          <ManagementView 
+            campuses={campuses} 
+            programs={programs} 
+            jobTitles={jobTitles}
+            departments={departments}
+          />
+        )}
       </main>
 
       {isModalOpen && (
@@ -273,20 +335,22 @@ export default function App() {
           campuses={campuses}
           staff={staff}
           classes={classes}
+          jobTitles={jobTitles}
         />
       )}
     </div>
   );
 }
 
-function SessionModal({ isOpen, onClose, editingSession, setEditingSession, campuses, staff, classes }: { 
+function SessionModal({ isOpen, onClose, editingSession, setEditingSession, campuses, staff, classes, jobTitles }: { 
   isOpen: boolean, 
   onClose: () => void, 
   editingSession: Partial<Session> | null, 
   setEditingSession: (s: Partial<Session> | null) => void,
   campuses: Campus[],
   staff: Staff[],
-  classes: Class[]
+  classes: Class[],
+  jobTitles: JobTitle[]
 }) {
   const activeClasses = classes
     .filter(c => c.status === 'Active')
@@ -294,11 +358,11 @@ function SessionModal({ isOpen, onClose, editingSession, setEditingSession, camp
 
   const sortedCampuses = [...campuses].sort((a, b) => a.name.localeCompare(b.name));
   const sortedTeachers = staff
-    .filter(s => s.role === 'Teacher')
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .filter(s => s.jobTitleIds?.includes(jobTitles.find(jt => jt.name === 'Teacher')?.id || ''))
+    .sort((a, b) => a.staffId.localeCompare(b.staffId));
   const sortedTAs = staff
-    .filter(s => s.role === 'TA')
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .filter(s => s.jobTitleIds?.includes(jobTitles.find(jt => jt.name === 'TA')?.id || ''))
+    .sort((a, b) => a.staffId.localeCompare(b.staffId));
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -359,14 +423,14 @@ function SessionModal({ isOpen, onClose, editingSession, setEditingSession, camp
               <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Teacher</label>
               <Select required value={editingSession?.teacherId || ''} onChange={e => setEditingSession({...editingSession, teacherId: e.target.value})}>
                 <option value="">Select Teacher</option>
-                {sortedTeachers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                {sortedTeachers.map(s => <option key={s.staffId} value={s.staffId}>{s.staffId} - {s.name}</option>)}
               </Select>
             </div>
             <div className="space-y-1">
               <label className="text-[10px] uppercase font-bold text-black/40 ml-1">TA (Optional)</label>
               <Select value={editingSession?.taId || ''} onChange={e => setEditingSession({...editingSession, taId: e.target.value})}>
                 <option value="">Select TA</option>
-                {sortedTAs.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                {sortedTAs.map(s => <option key={s.staffId} value={s.staffId}>{s.staffId} - {s.name}</option>)}
               </Select>
             </div>
           </div>
@@ -452,7 +516,7 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
     });
   };
 
-  if (!campuses.length) return <EmptyState message="No campuses found. Please add one in Settings." />;
+  if (!campuses.length) return <EmptyState message="No campuses found. Please add one in Management." />;
 
   return (
     <div className="space-y-6">
@@ -507,7 +571,7 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
                           {slot.label}
                         </td>
                         {weekDays.map(day => {
-                          const session = sessions.find(s => 
+                          const slotSessions = sessions.filter(s => 
                             s.campusId === campus.id && 
                             s.room === room && 
                             isSameDay(parseISO(s.startTime), day) &&
@@ -517,32 +581,34 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
                           return (
                             <td 
                               key={day.toISOString()} 
-                              className="p-1 border-r border-b border-black/5 align-middle h-16 cursor-pointer hover:bg-black/[0.02] transition-colors"
-                              onDoubleClick={() => session ? onAddSession(session) : handleDoubleClick(day, slot, room)}
+                              className="p-1 border-r border-b border-black/5 align-middle min-h-[80px] cursor-pointer hover:bg-black/[0.02] transition-colors"
+                              onDoubleClick={() => handleDoubleClick(day, slot, room)}
                             >
-                              {session ? (
-                                <div className="p-2 bg-emerald-50 border border-emerald-100 rounded-xl h-full flex flex-col justify-center overflow-hidden">
-                                  <p className="font-bold text-emerald-900 leading-tight mb-0.5 text-xs">
-                                    {classes.find(c => c.id === session.classId)?.name}
-                                  </p>
-                                  <p className="text-[10px] text-emerald-700/70 font-medium truncate">
-                                    GV: {staff.find(st => st.id === session.teacherId)?.name}
-                                  </p>
-                                  {session.taId && (
-                                    <p className="text-[9px] text-emerald-600/60 truncate">
-                                      TA: {staff.find(st => st.id === session.taId)?.name}
+                              <div className="flex flex-col gap-1 h-full">
+                                {slotSessions.map(session => (
+                                  <div 
+                                    key={session.id}
+                                    onClick={(e) => { e.stopPropagation(); onAddSession(session); }}
+                                    className="p-2 bg-emerald-50 border border-emerald-100 rounded-xl flex flex-col justify-center overflow-hidden"
+                                  >
+                                    <p className="font-bold text-emerald-900 leading-tight mb-0.5 text-[10px]">
+                                      {classes.find(c => c.id === session.classId)?.name}
                                     </p>
-                                  )}
-                                  {session.notes && (
-                                    <p className="text-[8px] text-emerald-600 italic truncate mt-0.5 border-t border-emerald-200/50 pt-0.5">
-                                      {session.notes}
+                                    <p className="text-[9px] text-emerald-700/70 font-medium truncate">
+                                      GV: {staff.find(st => st.staffId === session.teacherId)?.name}
                                     </p>
-                                  )}
-                                  {session.zoomId && <p className="text-[8px] text-emerald-500 font-mono truncate mt-0.5">Z: {session.zoomId}</p>}
-                                </div>
-                              ) : (
-                                <div className="h-full w-full opacity-10" />
-                              )}
+                                    {session.taId && (
+                                      <p className="text-[8px] text-emerald-600/60 truncate">
+                                        TA: {staff.find(st => st.staffId === session.taId)?.name}
+                                      </p>
+                                    )}
+                                    {session.zoomId && <p className="text-[8px] text-emerald-500 font-mono truncate mt-0.5">Z: {session.zoomId}</p>}
+                                  </div>
+                                ))}
+                                {slotSessions.length === 0 && (
+                                  <div className="h-full w-full opacity-10" />
+                                )}
+                              </div>
                             </td>
                           );
                         })}
@@ -574,7 +640,7 @@ function Dashboard2View({ campuses, sessions, staff, classes, onAddSession }: {
   const campus = campuses.find(c => c.id === selectedCampusId);
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(currentWeek, i));
 
-  if (!campuses.length) return <EmptyState message="No campuses found. Please add one in Settings." />;
+  if (!campuses.length) return <EmptyState message="No campuses found. Please add one in Management." />;
 
   const getSlotLabel = (start: string) => {
     if (start === '14:00') return 'CA CHIỀU 1';
@@ -653,7 +719,7 @@ function Dashboard2View({ campuses, sessions, staff, classes, onAddSession }: {
                                 </div>
                                 <div className="flex items-center gap-1.5 text-[10px] text-emerald-600/60">
                                   <span className="w-3.5 h-3.5 flex items-center justify-center bg-emerald-100 rounded text-[8px]">👤</span>
-                                  <span className="truncate">{staff.find(st => st.id === session.teacherId)?.name}</span>
+                                  <span className="truncate">{staff.find(st => st.staffId === session.teacherId)?.name}</span>
                                 </div>
                               </div>
                             </div>
@@ -769,8 +835,8 @@ function SchedulerView({ campuses, staff, classes, sessions, isModalOpen, setIsM
                 {format(parseISO(s.startTime), 'EEEE, HH:mm')} - {format(parseISO(s.endTime), 'HH:mm')}
               </p>
               <div className="flex flex-wrap gap-2">
-                <span className="px-2 py-1 bg-emerald-50 text-emerald-700 rounded-lg text-[10px] font-medium">GV: {staff.find(st => st.id === s.teacherId)?.name}</span>
-                {s.taId && <span className="px-2 py-1 bg-blue-50 text-blue-700 rounded-lg text-[10px] font-medium">TA: {staff.find(st => st.id === s.taId)?.name}</span>}
+                <span className="px-2 py-1 bg-emerald-50 text-emerald-700 rounded-lg text-[10px] font-medium">GV: {staff.find(st => st.staffId === s.teacherId)?.name}</span>
+                {s.taId && <span className="px-2 py-1 bg-blue-50 text-blue-700 rounded-lg text-[10px] font-medium">TA: {staff.find(st => st.staffId === s.taId)?.name}</span>}
                 {s.zoomId && <span className="px-2 py-1 bg-black/5 text-black/60 rounded-lg text-[10px] font-mono">Zoom: {s.zoomId}</span>}
               </div>
             </div>
@@ -782,17 +848,18 @@ function SchedulerView({ campuses, staff, classes, sessions, isModalOpen, setIsM
 
 // --- View: Staff View ---
 
-function StaffView({ staff, sessions, classes, campuses, onAddSession }: { 
+function StaffView({ staff, sessions, classes, campuses, jobTitles, onAddSession }: { 
   staff: Staff[], 
   sessions: Session[], 
   classes: Class[], 
   campuses: Campus[],
+  jobTitles: JobTitle[],
   onAddSession: (data: Partial<Session>) => void
 }) {
   const [currentWeek, setCurrentWeek] = useState(startOfWeek(new Date(), { weekStartsOn: 1 }));
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(currentWeek, i));
 
-  const handleDoubleClick = (day: Date, slot: typeof SLOTS[0], memberId: string) => {
+  const handleDoubleClick = (day: Date, slot: typeof SLOTS[0], staffId: string) => {
     const dateStr = format(day, 'yyyy-MM-dd');
     const startTime = new Date(`${dateStr}T${slot.start}:00`).toISOString();
     
@@ -801,7 +868,7 @@ function StaffView({ staff, sessions, classes, campuses, onAddSession }: {
     const endTime = end.toISOString();
 
     onAddSession({
-      teacherId: memberId,
+      teacherId: staffId,
       startTime,
       endTime
     });
@@ -834,22 +901,25 @@ function StaffView({ staff, sessions, classes, campuses, onAddSession }: {
               </tr>
             </thead>
             <tbody>
-              {staff.sort((a, b) => a.name.localeCompare(b.name)).map(member => (
+              {staff.sort((a, b) => (a.staffId || '').localeCompare(b.staffId || '')).map(member => (
                 <React.Fragment key={member.id}>
                   {SLOTS.map((slot, slotIdx) => (
                     <tr key={`${member.id}-${slot.id}`}>
                       {slotIdx === 0 && (
                         <td rowSpan={4} className="sticky left-0 z-10 p-4 border-r border-b border-black/5 bg-[#fafafa] align-middle w-[150px] min-w-[150px] max-w-[150px]">
                           <p className="font-bold text-sm">{member.name}</p>
-                          <p className="text-[10px] text-black/40 uppercase tracking-widest">{member.role}</p>
+                          <p className="text-[10px] text-black/40 uppercase tracking-widest">
+                            {member.jobTitleIds?.map(id => jobTitles.find(jt => jt.id === id)?.name).join(', ')}
+                          </p>
+                          <p className="text-[9px] font-mono text-blue-600 font-bold">{member.staffId}</p>
                         </td>
                       )}
                       <td className="sticky left-[150px] z-10 p-2 border-r border-b border-black/5 text-[10px] font-mono text-black/40 bg-[#fcfcfc] whitespace-nowrap align-middle w-[100px] min-w-[100px] max-w-[100px]">
                         {slot.label}
                       </td>
                       {weekDays.map(day => {
-                        const session = sessions.find(s => 
-                          (s.teacherId === member.id || s.taId === member.id) && 
+                        const slotSessions = sessions.filter(s => 
+                          (s.teacherId === member.staffId || s.taId === member.staffId) && 
                           isSameDay(parseISO(s.startTime), day) &&
                           format(parseISO(s.startTime), 'HH:mm') === slot.start
                         );
@@ -857,25 +927,27 @@ function StaffView({ staff, sessions, classes, campuses, onAddSession }: {
                         return (
                           <td 
                             key={day.toISOString()} 
-                            className="p-1 border-r border-b border-black/5 align-middle h-16 transition-colors"
+                            className="p-1 border-r border-b border-black/5 align-middle min-h-[80px] transition-colors"
                           >
-                            {session ? (
-                              <div className="p-2 bg-emerald-50 border border-emerald-100 rounded-xl h-full flex flex-col justify-center overflow-hidden">
-                                <p className="font-bold text-emerald-900 leading-tight mb-0.5 text-xs">
-                                  {classes.find(c => c.id === session.classId)?.name}
-                                </p>
-                                <p className="text-[10px] text-emerald-700/70 font-medium truncate">
-                                  {campuses.find(c => c.id === session.campusId)?.name} - {session.room}
-                                </p>
-                                {session.notes && (
-                                  <p className="text-[8px] text-emerald-600 italic truncate mt-0.5 border-t border-emerald-200/50 pt-0.5">
-                                    {session.notes}
+                            <div className="flex flex-col gap-1 h-full">
+                              {slotSessions.map(session => (
+                                <div 
+                                  key={session.id}
+                                  className="p-2 bg-emerald-50 border border-emerald-100 rounded-xl flex flex-col justify-center overflow-hidden"
+                                >
+                                  <p className="font-bold text-emerald-900 leading-tight mb-0.5 text-[10px]">
+                                    {classes.find(c => c.id === session.classId)?.name}
                                   </p>
-                                )}
-                              </div>
-                            ) : (
-                              <div className="h-full w-full opacity-10" />
-                            )}
+                                  <p className="text-[9px] text-emerald-700/70 font-medium truncate">
+                                    {campuses.find(c => c.id === session.campusId)?.name} - {session.room}
+                                  </p>
+                                  {session.zoomId && <p className="text-[8px] text-emerald-500 font-mono truncate mt-0.5">Z: {session.zoomId}</p>}
+                                </div>
+                              ))}
+                              {slotSessions.length === 0 && (
+                                <div className="h-full w-full opacity-10" />
+                              )}
+                            </div>
                           </td>
                         );
                       })}
@@ -891,12 +963,13 @@ function StaffView({ staff, sessions, classes, campuses, onAddSession }: {
   );
 }
 
-// --- View: Settings (Category Management) ---
+// --- View: Management (Campuses & Programs) ---
 
-function SettingsView({ campuses, staff, classes }: { campuses: Campus[], staff: Staff[], classes: Class[] }) {
+function ManagementView({ campuses, programs, jobTitles, departments }: { campuses: Campus[], programs: Program[], jobTitles: JobTitle[], departments: Department[] }) {
   const [newCampus, setNewCampus] = useState<{ id?: string, name: string, rooms: string }>({ name: '', rooms: '' });
-  const [newStaff, setNewStaff] = useState<{ id?: string, name: string, role: 'Teacher' | 'TA' }>({ name: '', role: 'Teacher' });
-  const [newClass, setNewClass] = useState<{ id?: string, name: string }>({ name: '' });
+  const [newProgram, setNewProgram] = useState<{ id?: string, name: string }>({ name: '' });
+  const [newJobTitle, setNewJobTitle] = useState<{ id?: string, name: string }>({ name: '' });
+  const [newDepartment, setNewDepartment] = useState<{ id?: string, name: string }>({ name: '' });
 
   const saveCampus = async () => {
     if (!newCampus.name || !newCampus.rooms) return;
@@ -912,37 +985,69 @@ function SettingsView({ campuses, staff, classes }: { campuses: Campus[], staff:
     setNewCampus({ name: '', rooms: '' });
   };
 
-  const saveStaff = async () => {
-    if (!newStaff.name) return;
-    const data = { name: newStaff.name, role: newStaff.role };
-    if (newStaff.id) {
-      await updateDoc(doc(db, 'staff', newStaff.id), data);
+  const saveProgram = async () => {
+    if (!newProgram.name) return;
+    const data = { name: newProgram.name };
+    if (newProgram.id) {
+      await updateDoc(doc(db, 'programs', newProgram.id), data);
     } else {
-      await addDoc(collection(db, 'staff'), data);
+      await addDoc(collection(db, 'programs'), data);
     }
-    setNewStaff({ name: '', role: 'Teacher' });
+    setNewProgram({ name: '' });
   };
 
-  const saveClass = async () => {
-    if (!newClass.name) return;
-    const data = { name: newClass.name };
-    if (newClass.id) {
-      await updateDoc(doc(db, 'classes', newClass.id), data);
+  const saveJobTitle = async () => {
+    if (!newJobTitle.name) return;
+    const data = { name: newJobTitle.name };
+    if (newJobTitle.id) {
+      await updateDoc(doc(db, 'jobTitles', newJobTitle.id), data);
     } else {
-      await addDoc(collection(db, 'classes'), { ...data, status: 'Active' });
+      await addDoc(collection(db, 'jobTitles'), data);
     }
-    setNewClass({ name: '' });
+    setNewJobTitle({ name: '' });
   };
 
-  const toggleClassStatus = async (cls: Class) => {
-    await updateDoc(doc(db, 'classes', cls.id), {
-      status: cls.status === 'Active' ? 'Archived' : 'Active'
-    });
+  const saveDepartment = async () => {
+    if (!newDepartment.name) return;
+    const data = { name: newDepartment.name };
+    if (newDepartment.id) {
+      await updateDoc(doc(db, 'departments', newDepartment.id), data);
+    } else {
+      await addDoc(collection(db, 'departments'), data);
+    }
+    setNewDepartment({ name: '' });
+  };
+
+  const initDefaultPrograms = async () => {
+    const defaults = ['TOEIC', 'IELTS', 'KID', 'KET-PET-FCE', 'GIAO TIẾP', 'OTHER'];
+    for (const name of defaults) {
+      if (!programs.find(p => p.name === name)) {
+        await addDoc(collection(db, 'programs'), { name });
+      }
+    }
+  };
+
+  const initDefaultJobTitles = async () => {
+    const defaults = ['Teacher', 'CEO', 'Director', 'Team Leader', 'BOD', 'TA', 'Admin', 'Sale', 'Manager'];
+    for (const name of defaults) {
+      if (!jobTitles.find(j => j.name === name)) {
+        await addDoc(collection(db, 'jobTitles'), { name });
+      }
+    }
+  };
+
+  const initDefaultDepartments = async () => {
+    const defaults = ['TOEIC', 'IELTS', 'ADMIN', 'KIDS'];
+    for (const name of defaults) {
+      if (!departments.find(d => d.name === name)) {
+        await addDoc(collection(db, 'departments'), { name });
+      }
+    }
   };
 
   return (
-    <div className="max-w-4xl space-y-12">
-      <h1 className="text-3xl font-serif italic">Category Management</h1>
+    <div className="max-w-4xl space-y-12 pb-20">
+      <h1 className="text-3xl font-serif italic">Management</h1>
 
       {/* Campuses */}
       <section className="space-y-4">
@@ -976,34 +1081,32 @@ function SettingsView({ campuses, staff, classes }: { campuses: Campus[], staff:
         </div>
       </section>
 
-      {/* Staff */}
+      {/* Programs */}
       <section className="space-y-4">
-        <h2 className="text-xl font-bold flex items-center gap-2">
-          <Users size={20} className="text-blue-600" />
-          Staff Directory
-        </h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-bold flex items-center gap-2">
+            <GraduationCap size={20} className="text-orange-600" />
+            Programs
+          </h2>
+          {!programs.length && (
+            <button onClick={initDefaultPrograms} className="text-xs text-emerald-600 hover:underline">Initialize Defaults</button>
+          )}
+        </div>
         <div className="bg-white p-6 rounded-[32px] border border-black/5 shadow-sm space-y-6">
           <div className="flex gap-4">
-            <Input placeholder="Full Name" value={newStaff.name} onChange={e => setNewStaff({...newStaff, name: e.target.value})} />
-            <Select value={newStaff.role} onChange={e => setNewStaff({...newStaff, role: e.target.value as any})}>
-              <option value="Teacher">Teacher</option>
-              <option value="TA">TA</option>
-            </Select>
-            <Button onClick={saveStaff} className="bg-emerald-600 text-white hover:bg-emerald-700 whitespace-nowrap">
-              {newStaff.id ? 'Update' : 'Add Staff'}
+            <Input placeholder="Program Name (e.g. IELTS)" value={newProgram.name} onChange={e => setNewProgram({...newProgram, name: e.target.value})} />
+            <Button onClick={saveProgram} className="bg-emerald-600 text-white hover:bg-emerald-700 whitespace-nowrap">
+              {newProgram.id ? 'Update' : 'Add Program'}
             </Button>
-            {newStaff.id && <Button onClick={() => setNewStaff({ name: '', role: 'Teacher' })} className="bg-black/5 hover:bg-black/10">Cancel</Button>}
+            {newProgram.id && <Button onClick={() => setNewProgram({ name: '' })} className="bg-black/5 hover:bg-black/10">Cancel</Button>}
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-            {[...staff].sort((a, b) => a.name.localeCompare(b.name)).map(s => (
-              <div key={s.id} className="p-4 bg-black/5 rounded-2xl flex justify-between items-center">
-                <div>
-                  <p className="font-bold text-sm">{s.name}</p>
-                  <p className="text-[10px] text-black/40 uppercase tracking-widest">{s.role}</p>
-                </div>
+            {[...programs].sort((a, b) => a.name.localeCompare(b.name)).map(p => (
+              <div key={p.id} className="p-4 bg-black/5 rounded-2xl flex justify-between items-center">
+                <p className="font-bold text-sm">{p.name}</p>
                 <div className="flex gap-2">
-                  <button onClick={() => setNewStaff({ id: s.id, name: s.name, role: s.role })} className="text-emerald-600 hover:text-emerald-700 p-1"><Settings size={16} /></button>
-                  <button onClick={() => deleteDoc(doc(db, 'staff', s.id))} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16} /></button>
+                  <button onClick={() => setNewProgram({ id: p.id, name: p.name })} className="text-emerald-600 hover:text-emerald-700 p-1"><Settings size={16} /></button>
+                  <button onClick={() => deleteDoc(doc(db, 'programs', p.id))} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16} /></button>
                 </div>
               </div>
             ))}
@@ -1011,33 +1114,65 @@ function SettingsView({ campuses, staff, classes }: { campuses: Campus[], staff:
         </div>
       </section>
 
-      {/* Classes */}
+      {/* Job Titles */}
       <section className="space-y-4">
-        <h2 className="text-xl font-bold flex items-center gap-2">
-          <Calendar size={20} className="text-purple-600" />
-          Class Management
-        </h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-bold flex items-center gap-2">
+            <Briefcase size={20} className="text-blue-600" />
+            Job Titles
+          </h2>
+          {!jobTitles.length && (
+            <button onClick={initDefaultJobTitles} className="text-xs text-emerald-600 hover:underline">Initialize Defaults</button>
+          )}
+        </div>
         <div className="bg-white p-6 rounded-[32px] border border-black/5 shadow-sm space-y-6">
           <div className="flex gap-4">
-            <Input placeholder="Class Name (e.g. IELTS 6.5)" value={newClass.name} onChange={e => setNewClass({...newClass, name: e.target.value})} />
-            <Button onClick={saveClass} className="bg-emerald-600 text-white hover:bg-emerald-700 whitespace-nowrap">
-              {newClass.id ? 'Update' : 'Add Class'}
+            <Input placeholder="Job Title (e.g. Teacher)" value={newJobTitle.name} onChange={e => setNewJobTitle({...newJobTitle, name: e.target.value})} />
+            <Button onClick={saveJobTitle} className="bg-emerald-600 text-white hover:bg-emerald-700 whitespace-nowrap">
+              {newJobTitle.id ? 'Update' : 'Add Job Title'}
             </Button>
-            {newClass.id && <Button onClick={() => setNewClass({ name: '' })} className="bg-black/5 hover:bg-black/10">Cancel</Button>}
+            {newJobTitle.id && <Button onClick={() => setNewJobTitle({ name: '' })} className="bg-black/5 hover:bg-black/10">Cancel</Button>}
           </div>
-          <div className="space-y-2">
-            {[...classes].sort((a, b) => a.name.localeCompare(b.name)).map(c => (
-              <div key={c.id} className={cn("p-4 rounded-2xl flex justify-between items-center", c.status === 'Active' ? 'bg-black/5' : 'bg-black/[0.02] opacity-50')}>
-                <div>
-                  <p className="font-bold text-sm">{c.name}</p>
-                  <p className="text-[10px] text-black/40 uppercase tracking-widest">{c.status}</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            {[...jobTitles].sort((a, b) => a.name.localeCompare(b.name)).map(j => (
+              <div key={j.id} className="p-4 bg-black/5 rounded-2xl flex justify-between items-center">
+                <p className="font-bold text-sm">{j.name}</p>
+                <div className="flex gap-2">
+                  <button onClick={() => setNewJobTitle({ id: j.id, name: j.name })} className="text-emerald-600 hover:text-emerald-700 p-1"><Settings size={16} /></button>
+                  <button onClick={() => deleteDoc(doc(db, 'jobTitles', j.id))} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16} /></button>
                 </div>
-                <div className="flex gap-4 items-center">
-                  <button onClick={() => toggleClassStatus(c)} className="text-xs font-medium text-emerald-600 hover:underline">
-                    {c.status === 'Active' ? 'Archive' : 'Restore'}
-                  </button>
-                  <button onClick={() => setNewClass({ id: c.id, name: c.name })} className="text-emerald-600 hover:text-emerald-700 p-1"><Settings size={16} /></button>
-                  <button onClick={() => deleteDoc(doc(db, 'classes', c.id))} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16} /></button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Departments */}
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-bold flex items-center gap-2">
+            <Building2 size={20} className="text-purple-600" />
+            Departments
+          </h2>
+          {!departments.length && (
+            <button onClick={initDefaultDepartments} className="text-xs text-emerald-600 hover:underline">Initialize Defaults</button>
+          )}
+        </div>
+        <div className="bg-white p-6 rounded-[32px] border border-black/5 shadow-sm space-y-6">
+          <div className="flex gap-4">
+            <Input placeholder="Department (e.g. IELTS)" value={newDepartment.name} onChange={e => setNewDepartment({...newDepartment, name: e.target.value})} />
+            <Button onClick={saveDepartment} className="bg-emerald-600 text-white hover:bg-emerald-700 whitespace-nowrap">
+              {newDepartment.id ? 'Update' : 'Add Department'}
+            </Button>
+            {newDepartment.id && <Button onClick={() => setNewDepartment({ name: '' })} className="bg-black/5 hover:bg-black/10">Cancel</Button>}
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            {[...departments].sort((a, b) => a.name.localeCompare(b.name)).map(d => (
+              <div key={d.id} className="p-4 bg-black/5 rounded-2xl flex justify-between items-center">
+                <p className="font-bold text-sm">{d.name}</p>
+                <div className="flex gap-2">
+                  <button onClick={() => setNewDepartment({ id: d.id, name: d.name })} className="text-emerald-600 hover:text-emerald-700 p-1"><Settings size={16} /></button>
+                  <button onClick={() => deleteDoc(doc(db, 'departments', d.id))} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16} /></button>
                 </div>
               </div>
             ))}
@@ -1048,11 +1183,763 @@ function SettingsView({ campuses, staff, classes }: { campuses: Campus[], staff:
   );
 }
 
+// --- View: Teacher (Staff Directory) ---
+
+// --- View: Teacher (Staff Directory) ---
+
+function TeacherView({ staff, jobTitles, departments, classes, sessions }: { 
+  staff: Staff[], 
+  jobTitles: JobTitle[], 
+  departments: Department[],
+  classes: Class[],
+  sessions: Session[]
+}) {
+  const [editingStaff, setEditingStaff] = useState<Partial<Staff> | null>(null);
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showResigned, setShowResigned] = useState(false);
+
+  const sortedStaff = [...staff]
+    .filter(s => showResigned || s.status === 'Working')
+    .sort((a, b) => {
+      // Working staff first
+      if (a.status === 'Working' && b.status !== 'Working') return -1;
+      if (a.status !== 'Working' && b.status === 'Working') return 1;
+      
+      // Then by staffId
+      if (a.staffId && b.staffId) return a.staffId.localeCompare(b.staffId);
+      return a.name.localeCompare(b.name);
+    });
+
+  const generateNextStaffId = () => {
+    const ids = staff.map(s => s.staffId).filter(id => id && id.startsWith('NV'));
+    if (ids.length === 0) return 'NV001';
+    const maxId = Math.max(...ids.map(id => parseInt(id.replace('NV', ''))));
+    return `NV${(maxId + 1).toString().padStart(3, '0')}`;
+  };
+
+  const migrateStaffIds = async () => {
+    const batch = writeBatch(db);
+    const alphabetStaff = [...staff].sort((a, b) => a.name.localeCompare(b.name));
+    
+    const idMap: Record<string, string> = {}; // Old ID -> New Staff ID (NVxxx)
+
+    alphabetStaff.forEach((s, idx) => {
+      const newStaffId = `NV${(idx + 1).toString().padStart(3, '0')}`;
+      idMap[s.id] = newStaffId;
+      batch.update(doc(db, 'staff', s.id), { staffId: newStaffId });
+    });
+
+    // Update classes
+    classes.forEach(c => {
+      const updates: any = {};
+      if (c.teacherId && idMap[c.teacherId]) updates.teacherId = idMap[c.teacherId];
+      if (c.taId && idMap[c.taId]) updates.taId = idMap[c.taId];
+      if (Object.keys(updates).length > 0) {
+        batch.update(doc(db, 'classes', c.id), updates);
+      }
+    });
+
+    // Update sessions
+    sessions.forEach(s => {
+      const updates: any = {};
+      if (s.teacherId && idMap[s.teacherId]) updates.teacherId = idMap[s.teacherId];
+      if (s.taId && idMap[s.taId]) updates.taId = idMap[s.taId];
+      if (Object.keys(updates).length > 0) {
+        batch.update(doc(db, 'sessions', s.id), updates);
+      }
+    });
+
+    await batch.commit();
+    alert("Migration complete! All staff assigned IDs and references updated.");
+  };
+
+  const fixSpecificStaffId = async () => {
+    const target = staff.find(s => s.name === 'Nguyễn Trọng Quyết' || s.staffId === 'NV029');
+    if (!target) {
+      alert("Could not find staff member 'Nguyễn Trọng Quyết' or 'NV029'");
+      return;
+    }
+
+    const batch = writeBatch(db);
+    const oldId = target.staffId || target.id;
+    const newId = 'NV001';
+
+    // Update the staff member
+    batch.update(doc(db, 'staff', target.id), { staffId: newId });
+
+    // Update classes
+    classes.forEach(c => {
+      const updates: any = {};
+      if (c.teacherId === oldId) updates.teacherId = newId;
+      if (c.taId === oldId) updates.taId = newId;
+      if (Object.keys(updates).length > 0) {
+        batch.update(doc(db, 'classes', c.id), updates);
+      }
+    });
+
+    // Update sessions
+    sessions.forEach(s => {
+      const updates: any = {};
+      if (s.teacherId === oldId) updates.teacherId = newId;
+      if (s.taId === oldId) updates.taId = newId;
+      if (Object.keys(updates).length > 0) {
+        batch.update(doc(db, 'sessions', s.id), updates);
+      }
+    });
+
+    await batch.commit();
+    alert(`Updated ${target.name} to ${newId} and updated all references.`);
+  };
+
+  const saveStaff = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingStaff?.name) return;
+
+    const data = {
+      staffId: editingStaff.staffId || generateNextStaffId(),
+      name: editingStaff.name,
+      jobTitleIds: editingStaff.jobTitleIds || [],
+      departmentIds: editingStaff.departmentIds || [],
+      status: editingStaff.status || 'Working',
+      gender: editingStaff.gender || 'Male',
+      birthDate: editingStaff.birthDate || '',
+      phone: editingStaff.phone || '',
+      email: editingStaff.email || '',
+      address: editingStaff.address || '',
+      citizenId: editingStaff.citizenId || '',
+      citizenIdDate: editingStaff.citizenIdDate || '',
+      socialInsuranceId: editingStaff.socialInsuranceId || '',
+      healthInsuranceId: editingStaff.healthInsuranceId || '',
+      childrenCount: Number(editingStaff.childrenCount) || 0,
+      emergencyContact: editingStaff.emergencyContact || '',
+      degrees: editingStaff.degrees || '',
+      certificates: editingStaff.certificates || '',
+      bankAccount: editingStaff.bankAccount || '',
+      bankName: editingStaff.bankName || ''
+    };
+
+    if (editingStaff.id) {
+      await updateDoc(doc(db, 'staff', editingStaff.id), data);
+    } else {
+      await addDoc(collection(db, 'staff'), data);
+    }
+    setEditingStaff(null);
+    setIsFormOpen(false);
+  };
+
+  const deleteStaff = async () => {
+    if (!editingStaff?.id) return;
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      return;
+    }
+    await deleteDoc(doc(db, 'staff', editingStaff.id));
+    setEditingStaff(null);
+    setIsFormOpen(false);
+    setConfirmDelete(false);
+  };
+
+  const toggleSelection = (field: 'jobTitleIds' | 'departmentIds', id: string) => {
+    const current = editingStaff?.[field] || [];
+    const next = current.includes(id) ? current.filter(i => i !== id) : [...current, id];
+    setEditingStaff({ ...editingStaff, [field]: next });
+  };
+
+  return (
+    <div className="flex gap-6 h-[calc(100vh-100px)]">
+      {/* Left: Staff List */}
+      <div className="w-1/3 bg-white rounded-[32px] border border-black/5 shadow-sm flex flex-col overflow-hidden">
+        <div className="p-6 border-b border-black/5 flex justify-between items-center bg-gray-50/50">
+          <div className="flex flex-col gap-1">
+            <h2 className="text-xl font-bold flex items-center gap-2">
+              <Users size={20} className="text-blue-600" />
+              Staff
+            </h2>
+            <div className="flex gap-3 items-center">
+              {staff.some(s => !s.staffId) && (
+                <button onClick={migrateStaffIds} className="text-[10px] font-bold text-emerald-600 hover:underline uppercase tracking-wider">
+                  Migrate IDs
+                </button>
+              )}
+              <button 
+                onClick={() => setShowResigned(!showResigned)}
+                className={cn(
+                  "text-[10px] font-bold uppercase tracking-wider transition-colors",
+                  showResigned ? "text-blue-600" : "text-black/40 hover:text-black/60"
+                )}
+              >
+                {showResigned ? "Hide Resigned" : "Show All"}
+              </button>
+              {staff.some(s => s.staffId === 'NV029') && (
+                <button onClick={fixSpecificStaffId} className="text-[10px] font-bold text-orange-600 hover:underline uppercase tracking-wider">
+                  Fix NV029
+                </button>
+              )}
+            </div>
+          </div>
+          <Button 
+            onClick={() => { setEditingStaff({ status: 'Working', gender: 'Male', jobTitleIds: [], departmentIds: [] }); setIsFormOpen(true); setConfirmDelete(false); }}
+            className="bg-emerald-600 text-white hover:bg-emerald-700 text-xs py-1.5 h-auto"
+          >
+            <Plus size={14} className="mr-1" /> Add Staff
+          </Button>
+        </div>
+        <div className="flex-1 overflow-auto p-4 space-y-2">
+          {sortedStaff.map(s => (
+            <div 
+              key={s.id} 
+              onClick={() => { setEditingStaff(s); setIsFormOpen(true); setConfirmDelete(false); }}
+              className={cn(
+                "p-3 rounded-xl flex justify-between items-center cursor-pointer transition-all border",
+                editingStaff?.id === s.id ? "bg-blue-50 border-blue-200" : "bg-black/[0.02] border-transparent hover:bg-black/[0.05]",
+                s.status === 'Resigned' && "opacity-50"
+              )}
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold text-xs">
+                  {s.staffId?.replace('NV', '') || '??'}
+                </div>
+                <div>
+                  <p className="font-bold text-sm">{s.name}</p>
+                  <p className="text-[10px] text-black/40 font-mono">{s.staffId || 'No ID'}</p>
+                </div>
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-black/30">
+                  {s.status}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Right: Form */}
+      <div className="w-2/3 bg-white rounded-[32px] border border-black/5 shadow-sm flex flex-col overflow-hidden">
+        {isFormOpen ? (
+          <form onSubmit={saveStaff} className="flex flex-col h-full">
+            <div className="p-6 border-b border-black/5 bg-gray-50/50 flex justify-between items-center">
+              <h2 className="text-xl font-bold">
+                {editingStaff?.id ? `Edit Staff: ${editingStaff.staffId}` : 'New Staff'}
+              </h2>
+              {editingStaff?.staffId && (
+                <span className="px-3 py-1 bg-blue-100 text-blue-600 rounded-full text-[10px] font-bold tracking-widest">
+                  {editingStaff.staffId}
+                </span>
+              )}
+            </div>
+            <div className="flex-1 overflow-auto p-6 space-y-8">
+              {/* Basic Info */}
+              <div className="space-y-4">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-black/30 border-b border-black/5 pb-2">Basic Information</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Full Name *</label>
+                    <Input required value={editingStaff?.name || ''} onChange={e => setEditingStaff({...editingStaff, name: e.target.value})} placeholder="Họ và tên" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Status</label>
+                    <Select value={editingStaff?.status || 'Working'} onChange={e => setEditingStaff({...editingStaff, status: e.target.value as any})}>
+                      <option value="Working">Working</option>
+                      <option value="Resigned">Resigned</option>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Gender</label>
+                    <Select value={editingStaff?.gender || 'Male'} onChange={e => setEditingStaff({...editingStaff, gender: e.target.value as any})}>
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                      <option value="Other">Other</option>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Birth Date</label>
+                    <Input type="date" value={editingStaff?.birthDate || ''} onChange={e => setEditingStaff({...editingStaff, birthDate: e.target.value})} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Children (0-3)</label>
+                    <Input type="number" min="0" max="3" value={editingStaff?.childrenCount || 0} onChange={e => setEditingStaff({...editingStaff, childrenCount: Number(e.target.value)})} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Roles & Departments */}
+              <div className="grid grid-cols-2 gap-8">
+                <div className="space-y-3">
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-black/30 border-b border-black/5 pb-2">Job Titles</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {jobTitles.map(jt => (
+                      <button
+                        key={jt.id}
+                        type="button"
+                        onClick={() => toggleSelection('jobTitleIds', jt.id)}
+                        className={cn(
+                          "px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all border",
+                          editingStaff?.jobTitleIds?.includes(jt.id)
+                            ? "bg-blue-600 text-white border-blue-600"
+                            : "bg-white text-black/40 border-black/10 hover:border-black/30"
+                        )}
+                      >
+                        {jt.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-black/30 border-b border-black/5 pb-2">Departments</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {departments.map(dept => (
+                      <button
+                        key={dept.id}
+                        type="button"
+                        onClick={() => toggleSelection('departmentIds', dept.id)}
+                        className={cn(
+                          "px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all border",
+                          editingStaff?.departmentIds?.includes(dept.id)
+                            ? "bg-purple-600 text-white border-purple-600"
+                            : "bg-white text-black/40 border-black/10 hover:border-black/30"
+                        )}
+                      >
+                        {dept.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Contact Info */}
+              <div className="space-y-4">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-black/30 border-b border-black/5 pb-2">Contact & Address</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Phone</label>
+                    <Input value={editingStaff?.phone || ''} onChange={e => setEditingStaff({...editingStaff, phone: e.target.value})} placeholder="Số điện thoại" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Email</label>
+                    <Input type="email" value={editingStaff?.email || ''} onChange={e => setEditingStaff({...editingStaff, email: e.target.value})} placeholder="Email" />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Current Address</label>
+                  <Input value={editingStaff?.address || ''} onChange={e => setEditingStaff({...editingStaff, address: e.target.value})} placeholder="Địa chỉ hiện tại" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Emergency Contact</label>
+                  <Input value={editingStaff?.emergencyContact || ''} onChange={e => setEditingStaff({...editingStaff, emergencyContact: e.target.value})} placeholder="Tên & SĐT người liên hệ" />
+                </div>
+              </div>
+
+              {/* Identity & Insurance */}
+              <div className="space-y-4">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-black/30 border-b border-black/5 pb-2">Identity & Insurance</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Citizen ID (CCCD)</label>
+                    <Input value={editingStaff?.citizenId || ''} onChange={e => setEditingStaff({...editingStaff, citizenId: e.target.value})} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Issue Date</label>
+                    <Input type="date" value={editingStaff?.citizenIdDate || ''} onChange={e => setEditingStaff({...editingStaff, citizenIdDate: e.target.value})} />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Social Insurance ID</label>
+                    <Input value={editingStaff?.socialInsuranceId || ''} onChange={e => setEditingStaff({...editingStaff, socialInsuranceId: e.target.value})} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Health Insurance ID</label>
+                    <Input value={editingStaff?.healthInsuranceId || ''} onChange={e => setEditingStaff({...editingStaff, healthInsuranceId: e.target.value})} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Qualifications */}
+              <div className="space-y-4">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-black/30 border-b border-black/5 pb-2">Qualifications</h3>
+                <div className="space-y-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Degrees</label>
+                    <Input value={editingStaff?.degrees || ''} onChange={e => setEditingStaff({...editingStaff, degrees: e.target.value})} placeholder="Bằng cấp hiện có" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Certificates</label>
+                    <Input value={editingStaff?.certificates || ''} onChange={e => setEditingStaff({...editingStaff, certificates: e.target.value})} placeholder="Chứng chỉ hiện có" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Banking */}
+              <div className="space-y-4">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-black/30 border-b border-black/5 pb-2">Banking Details</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Account Number</label>
+                    <Input value={editingStaff?.bankAccount || ''} onChange={e => setEditingStaff({...editingStaff, bankAccount: e.target.value})} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Bank Name</label>
+                    <Input value={editingStaff?.bankName || ''} onChange={e => setEditingStaff({...editingStaff, bankName: e.target.value})} />
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="p-6 border-t border-black/5 space-y-3">
+              <div className="flex gap-3">
+                <Button type="button" onClick={() => { setEditingStaff(null); setIsFormOpen(false); setConfirmDelete(false); }} className="flex-1 bg-black/5 hover:bg-black/10">Cancel</Button>
+                <Button type="submit" className="flex-1 bg-emerald-600 text-white hover:bg-emerald-700">Save Staff</Button>
+              </div>
+              {editingStaff?.id && (
+                <button 
+                  type="button" 
+                  onClick={deleteStaff}
+                  onMouseLeave={() => setConfirmDelete(false)}
+                  className={cn(
+                    "w-full py-2 text-xs rounded-xl transition-all flex items-center justify-center gap-2 border",
+                    confirmDelete 
+                      ? "bg-red-600 text-white border-red-600 font-bold animate-pulse" 
+                      : "text-red-400 hover:text-red-600 hover:bg-red-50 border-transparent"
+                  )}
+                >
+                  <Trash2 size={14} />
+                  {confirmDelete ? 'Click again to confirm deletion' : 'Delete Staff'}
+                </button>
+              )}
+            </div>
+          </form>
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center text-center p-12 opacity-30">
+            <Users size={48} className="mb-4" />
+            <p className="text-sm font-medium">Select a staff member to edit or click "Add Staff" to create a new one.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// --- View: Course (Class Management) ---
+
+function CourseView({ classes, programs, staff, campuses, jobTitles }: { classes: Class[], programs: Program[], staff: Staff[], campuses: Campus[], jobTitles: JobTitle[] }) {
+  const [editingClass, setEditingClass] = useState<Partial<Class> | null>(null);
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const saveClass = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingClass?.name || !editingClass?.programId || !editingClass?.teacherId) return;
+
+    const data = {
+      name: editingClass.name,
+      programId: editingClass.programId,
+      status: editingClass.status || 'Active',
+      teacherId: editingClass.teacherId,
+      taId: editingClass.taId || '',
+      startDate: editingClass.startDate || format(new Date(), 'yyyy-MM-dd'),
+      endDate: editingClass.endDate || format(addWeeks(new Date(), 12), 'yyyy-MM-dd'),
+      tuitionFull: Number(editingClass.tuitionFull) || 0,
+      tuitionMonthly: Number(editingClass.tuitionMonthly) || 0,
+      schedule: editingClass.schedule || []
+    };
+
+    if (editingClass.id) {
+      await updateDoc(doc(db, 'classes', editingClass.id), data);
+    } else {
+      await addDoc(collection(db, 'classes'), data);
+    }
+    setEditingClass(null);
+    setIsFormOpen(false);
+  };
+
+  const deleteClass = async () => {
+    if (!editingClass?.id) return;
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      return;
+    }
+    
+    await deleteDoc(doc(db, 'classes', editingClass.id));
+    setEditingClass(null);
+    setIsFormOpen(false);
+    setConfirmDelete(false);
+  };
+
+  const addScheduleItem = () => {
+    const newSchedule = [...(editingClass?.schedule || []), { dayOfWeek: 1, campusId: campuses[0]?.id || '', room: '', slot: 'CA TỐI 1' }];
+    setEditingClass({ ...editingClass, schedule: newSchedule });
+  };
+
+  const removeScheduleItem = (index: number) => {
+    const newSchedule = [...(editingClass?.schedule || [])];
+    newSchedule.splice(index, 1);
+    setEditingClass({ ...editingClass, schedule: newSchedule });
+  };
+
+  const updateScheduleItem = (index: number, field: keyof ScheduleItem, value: any) => {
+    const newSchedule = [...(editingClass?.schedule || [])];
+    newSchedule[index] = { ...newSchedule[index], [field]: value };
+    setEditingClass({ ...editingClass, schedule: newSchedule });
+  };
+
+  const filteredClasses = showArchived ? classes : classes.filter(c => c.status === 'Active');
+
+  const sortedPrograms = [...programs].sort((a, b) => {
+    if (a.name === "SẮP KHAI GIẢNG") return -1;
+    if (b.name === "SẮP KHAI GIẢNG") return 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  return (
+    <div className="flex gap-6 h-[calc(100vh-100px)]">
+      {/* Left: Class List grouped by Program */}
+      <div className="w-1/2 bg-white rounded-[32px] border border-black/5 shadow-sm flex flex-col overflow-hidden">
+        <div className="p-6 border-b border-black/5 flex justify-between items-center bg-gray-50/50">
+          <div className="flex flex-col gap-1">
+            <h2 className="text-xl font-bold flex items-center gap-2">
+              <BookOpen size={20} className="text-purple-600" />
+              Classes
+            </h2>
+            <button 
+              onClick={() => setShowArchived(!showArchived)}
+              className={cn(
+                "text-[10px] font-bold uppercase tracking-wider text-left transition-colors",
+                showArchived ? "text-emerald-600" : "text-black/30 hover:text-black/50"
+              )}
+            >
+              {showArchived ? "● Showing All" : "○ Show Archived"}
+            </button>
+          </div>
+          <Button 
+            onClick={() => { setEditingClass({ status: 'Active', schedule: [] }); setIsFormOpen(true); setConfirmDelete(false); }}
+            className="bg-emerald-600 text-white hover:bg-emerald-700 text-xs py-1.5 h-auto"
+          >
+            <Plus size={14} className="mr-1" /> Add Class
+          </Button>
+        </div>
+        <div className="flex-1 overflow-auto p-4 space-y-6">
+          {sortedPrograms.map(program => {
+            const programClasses = filteredClasses
+              .filter(c => c.programId === program.id)
+              .sort((a, b) => a.name.localeCompare(b.name));
+            
+            if (programClasses.length === 0) return null;
+            return (
+              <div key={program.id} className="space-y-2">
+                <h3 className="text-[10px] uppercase tracking-widest font-bold text-black/30 px-2">{program.name}</h3>
+                <div className="space-y-1">
+                  {programClasses.map(c => (
+                    <div 
+                      key={c.id} 
+                      onClick={() => { setEditingClass(c); setIsFormOpen(true); setConfirmDelete(false); }}
+                      className={cn(
+                        "p-3 rounded-xl flex justify-between items-center cursor-pointer transition-all border",
+                        editingClass?.id === c.id ? "bg-emerald-50 border-emerald-200" : "bg-black/[0.02] border-transparent hover:bg-black/[0.05]",
+                        c.status === 'Archived' && "opacity-50"
+                      )}
+                    >
+                      <div>
+                        <p className="font-bold text-sm">{c.name}</p>
+                        <p className="text-[10px] text-black/40">
+                          {staff.find(s => s.staffId === c.teacherId)?.name || 'No Teacher'} • {c.status}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+          {filteredClasses.filter(c => !c.programId || !programs.find(p => p.id === c.programId)).length > 0 && (
+            <div className="space-y-2">
+              <h3 className="text-[10px] uppercase tracking-widest font-bold text-black/30 px-2">Uncategorized</h3>
+              <div className="space-y-1">
+                {filteredClasses
+                  .filter(c => !c.programId || !programs.find(p => p.id === c.programId))
+                  .sort((a, b) => a.name.localeCompare(b.name))
+                  .map(c => (
+                  <div 
+                    key={c.id} 
+                    onClick={() => { setEditingClass(c); setIsFormOpen(true); setConfirmDelete(false); }}
+                    className={cn(
+                      "p-3 rounded-xl flex justify-between items-center cursor-pointer transition-all border",
+                      editingClass?.id === c.id ? "bg-emerald-50 border-emerald-200" : "bg-black/[0.02] border-transparent hover:bg-black/[0.05]"
+                    )}
+                  >
+                    <div>
+                      <p className="font-bold text-sm">{c.name}</p>
+                      <p className="text-[10px] text-black/40">{c.status}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Right: Add/Edit Form */}
+      <div className="w-1/2 bg-white rounded-[32px] border border-black/5 shadow-sm flex flex-col overflow-hidden">
+        {isFormOpen ? (
+          <form onSubmit={saveClass} className="flex flex-col h-full">
+            <div className="p-6 border-b border-black/5 bg-gray-50/50">
+              <h2 className="text-xl font-bold">
+                {editingClass?.id ? 'Edit Class' : 'New Class'}
+              </h2>
+            </div>
+            <div className="flex-1 overflow-auto p-6 space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Class Name</label>
+                  <Input required value={editingClass?.name || ''} onChange={e => setEditingClass({...editingClass, name: e.target.value})} placeholder="e.g. IELTS 6.5" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Program</label>
+                  <Select required value={editingClass?.programId || ''} onChange={e => setEditingClass({...editingClass, programId: e.target.value})}>
+                    <option value="">Select Program</option>
+                    {programs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Teacher</label>
+                  <Select required value={editingClass?.teacherId || ''} onChange={e => setEditingClass({...editingClass, teacherId: e.target.value})}>
+                    <option value="">Select Teacher</option>
+                    {staff.filter(s => s.jobTitleIds?.includes(jobTitles.find(jt => jt.name === 'Teacher')?.id || '') || s.jobTitleIds?.includes(jobTitles.find(jt => jt.name === 'Teacher')?.id || '')).map(s => <option key={s.staffId} value={s.staffId}>{s.staffId} - {s.name}</option>)}
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-black/40 ml-1">TA (Optional)</label>
+                  <Select value={editingClass?.taId || ''} onChange={e => setEditingClass({...editingClass, taId: e.target.value})}>
+                    <option value="">Select TA</option>
+                    {staff.filter(s => s.jobTitleIds?.includes(jobTitles.find(jt => jt.name === 'TA')?.id || '')).map(s => <option key={s.staffId} value={s.staffId}>{s.staffId} - {s.name}</option>)}
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Start Date</label>
+                  <Input type="date" value={editingClass?.startDate || ''} onChange={e => setEditingClass({...editingClass, startDate: e.target.value})} />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-black/40 ml-1">End Date (Estimated)</label>
+                  <Input type="date" value={editingClass?.endDate || ''} onChange={e => setEditingClass({...editingClass, endDate: e.target.value})} />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Học phí theo khóa</label>
+                  <Input type="number" value={editingClass?.tuitionFull || ''} onChange={e => setEditingClass({...editingClass, tuitionFull: Number(e.target.value)})} placeholder="VNĐ" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Học phí theo tháng</label>
+                  <Input type="number" value={editingClass?.tuitionMonthly || ''} onChange={e => setEditingClass({...editingClass, tuitionMonthly: Number(e.target.value)})} placeholder="VNĐ" />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Status</label>
+                <Select value={editingClass?.status || 'Active'} onChange={e => setEditingClass({...editingClass, status: e.target.value as any})}>
+                  <option value="Active">Active</option>
+                  <option value="Archived">Archived</option>
+                </Select>
+              </div>
+
+              <div className="space-y-4 pt-4 border-t border-black/5">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-sm font-bold">Weekly Schedule</h3>
+                  <Button type="button" onClick={addScheduleItem} className="text-[10px] py-1 h-auto bg-black/5 hover:bg-black/10">
+                    <Plus size={12} className="mr-1" /> Add Slot
+                  </Button>
+                </div>
+                <div className="space-y-3">
+                  {(editingClass?.schedule || []).map((item, idx) => (
+                    <div key={idx} className="p-4 bg-black/5 rounded-2xl space-y-3 relative group">
+                      <button 
+                        type="button" 
+                        onClick={() => removeScheduleItem(idx)}
+                        className="absolute top-2 right-2 text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                      <div className="grid grid-cols-2 gap-3">
+                        <Select value={item.dayOfWeek} onChange={e => updateScheduleItem(idx, 'dayOfWeek', Number(e.target.value))}>
+                          {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((day, dIdx) => (
+                            <option key={dIdx} value={dIdx}>{day}</option>
+                          ))}
+                        </Select>
+                        <Select value={item.slot} onChange={e => updateScheduleItem(idx, 'slot', e.target.value)}>
+                          <option value="CA CHIỀU 1">CA CHIỀU 1</option>
+                          <option value="CA CHIỀU 2">CA CHIỀU 2</option>
+                          <option value="CA TỐI 1">CA TỐI 1</option>
+                          <option value="CA TỐI 2">CA TỐI 2</option>
+                        </Select>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <Select value={item.campusId} onChange={e => updateScheduleItem(idx, 'campusId', e.target.value)}>
+                          <option value="">Select Campus</option>
+                          {campuses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </Select>
+                        <Select value={item.room} onChange={e => updateScheduleItem(idx, 'room', e.target.value)}>
+                          <option value="">Select Room</option>
+                          {campuses.find(c => c.id === item.campusId)?.rooms.map(r => <option key={r} value={r}>{r}</option>)}
+                        </Select>
+                      </div>
+                    </div>
+                  ))}
+                  {(!editingClass?.schedule || editingClass.schedule.length === 0) && (
+                    <p className="text-center text-xs text-black/30 py-4 italic">No schedule items added.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="p-6 border-t border-black/5 space-y-3">
+              <div className="flex gap-3">
+                <Button type="button" onClick={() => { setEditingClass(null); setIsFormOpen(false); setConfirmDelete(false); }} className="flex-1 bg-black/5 hover:bg-black/10">Cancel</Button>
+                <Button type="submit" className="flex-1 bg-emerald-600 text-white hover:bg-emerald-700">Save Class</Button>
+              </div>
+              {editingClass?.id && (
+                <button 
+                  type="button" 
+                  onClick={deleteClass}
+                  onMouseLeave={() => setConfirmDelete(false)}
+                  className={cn(
+                    "w-full py-2 text-xs rounded-xl transition-all flex items-center justify-center gap-2 border",
+                    confirmDelete 
+                      ? "bg-red-600 text-white border-red-600 font-bold animate-pulse" 
+                      : "text-red-400 hover:text-red-600 hover:bg-red-50 border-transparent"
+                  )}
+                >
+                  <Trash2 size={14} />
+                  {confirmDelete ? 'Click again to confirm deletion' : 'Delete Class'}
+                </button>
+              )}
+            </div>
+          </form>
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center text-center p-12 opacity-30">
+            <BookOpen size={48} className="mb-4" />
+            <p className="text-sm font-medium">Select a class to edit or click "Add Class" to create a new one.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function EmptyState({ message }: { message: string }) {
   return (
     <div className="h-[60vh] flex flex-col items-center justify-center text-center p-12">
       <div className="w-16 h-16 bg-black/5 rounded-full flex items-center justify-center mb-4">
-        <Settings size={32} className="text-black/20" />
+        <LayoutDashboard size={32} className="text-black/20" />
       </div>
       <p className="text-black/40 font-serif italic">{message}</p>
     </div>
