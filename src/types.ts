@@ -77,3 +77,11 @@ export interface Session {
   notes?: string;
   weekStart: string; // YYYY-MM-DD
 }
+
+export interface LeaveUsage {
+  id: string;
+  staffId: string;
+  date: string; // YYYY-MM-DD
+  days: number;
+  reason?: string;
+}

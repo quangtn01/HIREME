@@ -23,7 +23,8 @@ import {
   User 
 } from 'firebase/auth';
 import { db, auth } from './firebase';
-import { Campus, Staff, Class, Session, Program, ScheduleItem, JobTitle, Department } from './types';
+import * as XLSX from 'xlsx';
+import { Campus, Staff, Class, Session, Program, ScheduleItem, JobTitle, Department, LeaveUsage } from './types';
 import { 
   LayoutDashboard, 
   Grid,
@@ -42,7 +43,12 @@ import {
   BookOpen,
   GraduationCap,
   Briefcase,
-  Building2
+  Building2,
+  Download,
+  Upload,
+  Check,
+  X,
+  Edit2
 } from 'lucide-react';
 import { format, startOfWeek, addDays, parseISO, isSameDay, addWeeks, subWeeks, addMinutes } from 'date-fns';
 import { clsx, type ClassValue } from 'clsx';
@@ -121,6 +127,7 @@ const SessionTimePicker = ({ startTime, endTime, onChange }: { startTime: string
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'dashboard2' | 'scheduler' | 'staff' | 'course' | 'teacher' | 'management'>('dashboard');
   const [isTimetableOpen, setIsTimetableOpen] = useState(true);
   const [campuses, setCampuses] = useState<Campus[]>([]);
@@ -130,17 +137,47 @@ export default function App() {
   const [jobTitles, setJobTitles] = useState<JobTitle[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [leaveUsage, setLeaveUsage] = useState<LeaveUsage[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingSession, setEditingSession] = useState<Partial<Session> | null>(null);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      if (u) {
+        // Check if user is in staff collection with status 'Working'
+        const staffRef = collection(db, 'staff');
+        const q = query(staffRef, where('email', '==', u.email), where('status', '==', 'Working'));
+        const snap = await getDocs(q);
+        
+        const isAdminBypass = u.email === 'quangtn01@gmail.com';
+        
+        if (snap.empty && !isAdminBypass) {
+          setAuthError("Unauthorized: Only active staff members can access this system.");
+          await auth.signOut();
+          setUser(null);
+        } else {
+          setAuthError(null);
+          setUser(u);
+        }
+      } else {
+        setUser(null);
+      }
       setLoading(false);
     });
     return unsubscribe;
   }, []);
+
+  // Monitor staff status changes for the current user
+  useEffect(() => {
+    if (!user || staff.length === 0) return;
+    
+    const currentStaff = staff.find(s => s.email === user.email);
+    if (currentStaff && currentStaff.status !== 'Working') {
+      auth.signOut();
+      setAuthError("Your account status has been updated. Access revoked.");
+    }
+  }, [staff, user]);
 
   useEffect(() => {
     if (!user) return;
@@ -166,6 +203,9 @@ export default function App() {
     const unsubSessions = onSnapshot(collection(db, 'sessions'), (snap) => {
       setSessions(snap.docs.map(d => ({ id: d.id, ...d.data() } as Session)));
     });
+    const unsubLeave = onSnapshot(collection(db, 'leaveUsage'), (snap) => {
+      setLeaveUsage(snap.docs.map(d => ({ id: d.id, ...d.data() } as LeaveUsage)));
+    });
 
     return () => {
       unsubCampuses();
@@ -175,6 +215,7 @@ export default function App() {
       unsubJobTitles();
       unsubDepartments();
       unsubSessions();
+      unsubLeave();
     };
   }, [user]);
 
@@ -193,6 +234,13 @@ export default function App() {
         <div className="max-w-md w-full bg-white p-12 rounded-[32px] shadow-sm border border-black/5 text-center">
           <h1 className="text-4xl font-serif italic mb-2">Hireme Center</h1>
           <p className="text-black/50 mb-8">Schedule Management System</p>
+          
+          {authError && (
+            <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-2xl text-red-600 text-sm font-medium">
+              {authError}
+            </div>
+          )}
+
           <Button onClick={handleLogin} className="w-full bg-emerald-600 text-white hover:bg-emerald-700 py-4 flex items-center justify-center gap-2">
             <UserCircle size={20} />
             Sign in with Google
@@ -254,7 +302,7 @@ export default function App() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto p-4">
+      <main className="flex-1 overflow-auto p-4 pb-2">
         {activeTab === 'dashboard' && (
           <DashboardView 
             campuses={campuses} 
@@ -314,6 +362,7 @@ export default function App() {
             departments={departments} 
             classes={classes} 
             sessions={sessions} 
+            leaveUsage={leaveUsage}
           />
         )}
         {activeTab === 'management' && (
@@ -1187,13 +1236,266 @@ function ManagementView({ campuses, programs, jobTitles, departments }: { campus
 
 // --- View: Teacher (Staff Directory) ---
 
-function TeacherView({ staff, jobTitles, departments, classes, sessions }: { 
+function LeaveManagementView({ staff, leaveUsage }: { staff: Staff[], leaveUsage: LeaveUsage[] }) {
+  const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
+  const [newLeaveDays, setNewLeaveDays] = useState<number>(1);
+  const [newLeaveNote, setNewLeaveNote] = useState<string>('');
+  const [editingLeave, setEditingLeave] = useState<LeaveUsage | null>(null);
+
+  const currentYear = new Date().getFullYear();
+  const currentMonth = new Date().getMonth(); // 0-11
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
+
+  const calculateLeave = (s: Staff) => {
+    // Phép năm nay: 6 days in first 6 months, 12 days in last 6 months
+    const entitlement = currentMonth < 6 ? 6 : 12;
+    
+    // Phép bảo lưu: 0 for now as requested
+    const carryOver = 0;
+    
+    // Phép đã nghỉ: total days used this year
+    const usedThisYear = leaveUsage
+      .filter(l => l.staffId === s.id && l.date.startsWith(currentYear.toString()))
+      .reduce((acc, curr) => acc + curr.days, 0);
+
+    return {
+      entitlement,
+      carryOver,
+      used: usedThisYear,
+      remaining: entitlement + carryOver - usedThisYear
+    };
+  };
+
+  const workingStaff = staff
+    .filter(s => s.status === 'Working')
+    .sort((a, b) => (a.staffId || '').localeCompare(b.staffId || ''));
+
+  const selectedStaff = staff.find(s => s.id === selectedStaffId);
+  const selectedStaffLeaves = leaveUsage
+    .filter(l => l.staffId === selectedStaffId && l.date.startsWith(currentYear.toString()))
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  const handleAddLeave = async () => {
+    if (!selectedStaffId) return;
+    await addDoc(collection(db, 'leaveUsage'), {
+      staffId: selectedStaffId,
+      date: todayStr,
+      days: newLeaveDays,
+      reason: newLeaveNote
+    });
+    setNewLeaveDays(1);
+    setNewLeaveNote('');
+  };
+
+  const handleUpdateLeave = async () => {
+    if (!editingLeave) return;
+    await updateDoc(doc(db, 'leaveUsage', editingLeave.id), {
+      days: editingLeave.days,
+      reason: editingLeave.reason
+    });
+    setEditingLeave(null);
+  };
+
+  const handleDeleteLeave = async (id: string) => {
+    if (confirm('Are you sure you want to delete this leave entry?')) {
+      await deleteDoc(doc(db, 'leaveUsage', id));
+    }
+  };
+
+  return (
+    <div className="flex gap-6 flex-1 overflow-hidden">
+      {/* Left Part: Staff Summary */}
+      <div className="flex-[1.5] bg-white rounded-[32px] border border-black/5 shadow-sm overflow-hidden flex flex-col">
+        <div className="p-6 border-b border-black/5 flex justify-between items-center bg-gray-50/50">
+          <h2 className="text-xl font-bold flex items-center gap-2">
+            <Calendar size={20} className="text-blue-600" />
+            Leave Summary ({currentYear})
+          </h2>
+        </div>
+        <div className="flex-1 overflow-auto">
+          <table className="w-full text-left border-collapse">
+            <thead className="sticky top-0 z-20 bg-gray-100 shadow-sm">
+              <tr>
+                <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Họ và tên</th>
+                <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Phép bảo lưu</th>
+                <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Phép năm nay</th>
+                <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Phép đã nghỉ</th>
+                <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Số ngày nghỉ còn lại</th>
+                <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-black/5">
+              {workingStaff.map(s => {
+                const stats = calculateLeave(s);
+                const isSelected = selectedStaffId === s.id;
+                return (
+                  <tr key={s.id} className={cn("hover:bg-black/[0.02] transition-colors", isSelected && "bg-blue-50/50")}>
+                    <td className="p-4">
+                      <div className="font-bold text-sm">{s.name}</div>
+                      <div className="text-[10px] text-black/40 font-mono">{s.staffId}</div>
+                    </td>
+                    <td className="p-4 text-sm">{stats.carryOver}</td>
+                    <td className="p-4 text-sm">{stats.entitlement}</td>
+                    <td className="p-4 text-sm text-orange-600 font-bold">{stats.used}</td>
+                    <td className="p-4 text-sm text-emerald-600 font-bold">{stats.remaining}</td>
+                    <td className="p-4">
+                      <Button 
+                        onClick={() => setSelectedStaffId(s.id)}
+                        className={cn(
+                          "text-[10px] px-3 py-1 h-auto",
+                          isSelected ? "bg-blue-600 text-white" : "bg-black/5 text-black/60 hover:bg-black/10"
+                        )}
+                      >
+                        Manage
+                      </Button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Right Part: Staff Details & Add Leave */}
+      <div className="flex-1 bg-white rounded-[32px] border border-black/5 shadow-sm overflow-hidden flex flex-col">
+        {selectedStaff ? (
+          <>
+            <div className="p-6 border-b border-black/5 bg-gray-50/50">
+              <h2 className="text-lg font-bold truncate">{selectedStaff.name}</h2>
+              <p className="text-xs text-black/40 font-mono">{selectedStaff.staffId}</p>
+            </div>
+            
+            <div className="p-6 border-b border-black/5 space-y-4">
+              <h3 className="text-xs font-bold uppercase tracking-widest text-black/30">Thêm ngày nghỉ phép</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Ngày nghỉ</label>
+                  <Input value={todayStr} disabled className="bg-black/[0.02] cursor-not-allowed" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Số ngày nghỉ</label>
+                  <Input 
+                    type="number" 
+                    step="0.5"
+                    value={newLeaveDays} 
+                    onChange={e => setNewLeaveDays(Number(e.target.value))} 
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Ghi chú</label>
+                <Input 
+                  placeholder="Lý do nghỉ phép..." 
+                  value={newLeaveNote} 
+                  onChange={e => setNewLeaveNote(e.target.value)} 
+                />
+              </div>
+              <Button onClick={handleAddLeave} className="w-full bg-blue-600 text-white hover:bg-blue-700">
+                <Plus size={16} className="mr-2" /> Thêm nghỉ phép
+              </Button>
+            </div>
+
+            <div className="flex-1 overflow-auto">
+              <div className="p-4 bg-gray-50 border-b border-black/5">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-black/30">Lịch sử nghỉ phép {currentYear}</h3>
+              </div>
+              <table className="w-full text-left border-collapse">
+                <thead className="bg-white sticky top-0 z-10">
+                  <tr>
+                    <th className="p-3 text-[10px] font-bold uppercase text-black/40 border-b border-black/5">Ngày</th>
+                    <th className="p-3 text-[10px] font-bold uppercase text-black/40 border-b border-black/5">Số ngày</th>
+                    <th className="p-3 text-[10px] font-bold uppercase text-black/40 border-b border-black/5">Ghi chú</th>
+                    <th className="p-3 text-[10px] font-bold uppercase text-black/40 border-b border-black/5">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-black/5">
+                  {selectedStaffLeaves.map(l => (
+                    <tr key={l.id} className="hover:bg-black/[0.01]">
+                      <td className="p-3 text-xs font-mono">{l.date}</td>
+                      <td className="p-3 text-xs">
+                        {editingLeave?.id === l.id ? (
+                          <Input 
+                            type="number" 
+                            step="0.5"
+                            className="h-7 text-xs px-2"
+                            value={editingLeave.days}
+                            onChange={e => setEditingLeave({...editingLeave, days: Number(e.target.value)})}
+                          />
+                        ) : (
+                          <span className="font-bold">{l.days}</span>
+                        )}
+                      </td>
+                      <td className="p-3 text-xs">
+                        {editingLeave?.id === l.id ? (
+                          <Input 
+                            className="h-7 text-xs px-2"
+                            value={editingLeave.reason}
+                            onChange={e => setEditingLeave({...editingLeave, reason: e.target.value})}
+                          />
+                        ) : (
+                          <span className="text-black/60">{l.reason}</span>
+                        )}
+                      </td>
+                      <td className="p-3">
+                        <div className="flex items-center gap-1">
+                          {editingLeave?.id === l.id ? (
+                            <>
+                              <button onClick={handleUpdateLeave} className="text-emerald-600 hover:text-emerald-700 p-1">
+                                <Check size={14} />
+                              </button>
+                              <button onClick={() => setEditingLeave(null)} className="text-red-600 hover:text-red-700 p-1">
+                                <X size={14} />
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button onClick={() => setEditingLeave(l)} className="text-blue-600 hover:text-blue-700 p-1">
+                                <Edit2 size={14} />
+                              </button>
+                              <button onClick={() => handleDeleteLeave(l.id)} className="text-red-600 hover:text-red-700 p-1">
+                                <Trash2 size={14} />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {selectedStaffLeaves.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="p-8 text-center text-black/20 text-xs italic">
+                        Chưa có dữ liệu nghỉ phép trong năm nay
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center text-black/20 p-12 text-center">
+            <div className="w-16 h-16 bg-black/[0.02] rounded-full flex items-center justify-center mb-4">
+              <Calendar size={32} />
+            </div>
+            <h3 className="text-sm font-bold text-black/40">Chọn nhân viên</h3>
+            <p className="text-xs max-w-[200px] mt-2">Chọn nhân viên từ bảng bên trái để quản lý chi tiết nghỉ phép.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TeacherView({ staff, jobTitles, departments, classes, sessions, leaveUsage }: { 
   staff: Staff[], 
   jobTitles: JobTitle[], 
-  departments: Department[],
-  classes: Class[],
-  sessions: Session[]
+  departments: Department[], 
+  classes: Class[], 
+  sessions: Session[],
+  leaveUsage: LeaveUsage[]
 }) {
+  const [subTab, setSubTab] = useState<'summary' | 'details' | 'leave'>('summary');
   const [editingStaff, setEditingStaff] = useState<Partial<Staff> | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -1292,6 +1594,89 @@ function TeacherView({ staff, jobTitles, departments, classes, sessions }: {
     alert(`Updated ${target.name} to ${newId} and updated all references.`);
   };
 
+  const exportToExcel = () => {
+    const dataToExport = staff.map(s => ({
+      'ID (System)': s.id,
+      'Staff ID': s.staffId,
+      'Full Name': s.name,
+      'Status': s.status,
+      'Gender': s.gender,
+      'Birth Date': s.birthDate,
+      'Phone': s.phone,
+      'Email': s.email,
+      'Address': s.address,
+      'Citizen ID': s.citizenId,
+      'Citizen ID Date': s.citizenIdDate,
+      'Social Insurance ID': s.socialInsuranceId,
+      'Health Insurance ID': s.healthInsuranceId,
+      'Children Count': s.childrenCount,
+      'Emergency Contact': s.emergencyContact,
+      'Degrees': s.degrees,
+      'Certificates': s.certificates,
+      'Bank Account': s.bankAccount,
+      'Bank Name': s.bankName
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(dataToExport);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Staff");
+    XLSX.writeFile(wb, "Staff_Data.xlsx");
+  };
+
+  const importFromExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      const bstr = evt.target?.result;
+      const wb = XLSX.read(bstr, { type: 'binary' });
+      const wsname = wb.SheetNames[0];
+      const ws = wb.Sheets[wsname];
+      const data = XLSX.utils.sheet_to_json(ws) as any[];
+
+      const batch = writeBatch(db);
+      
+      for (const row of data) {
+        const staffData: any = {
+          staffId: row['Staff ID'] || '',
+          name: row['Full Name'] || '',
+          status: row['Status'] || 'Working',
+          gender: row['Gender'] || 'Male',
+          birthDate: row['Birth Date'] || '',
+          phone: row['Phone'] || '',
+          email: row['Email'] || '',
+          address: row['Address'] || '',
+          citizenId: row['Citizen ID'] || '',
+          citizenIdDate: row['Citizen ID Date'] || '',
+          socialInsuranceId: row['Social Insurance ID'] || '',
+          healthInsuranceId: row['Health Insurance ID'] || '',
+          childrenCount: Number(row['Children Count']) || 0,
+          emergencyContact: row['Emergency Contact'] || '',
+          degrees: row['Degrees'] || '',
+          certificates: row['Certificates'] || '',
+          bankAccount: row['Bank Account'] || '',
+          bankName: row['Bank Name'] || ''
+        };
+
+        const systemId = row['ID (System)'];
+        if (systemId) {
+          batch.update(doc(db, 'staff', systemId), staffData);
+        } else {
+          if (staffData.name) {
+            const newDoc = doc(collection(db, 'staff'));
+            batch.set(newDoc, staffData);
+          }
+        }
+      }
+
+      await batch.commit();
+      alert("Import complete!");
+      e.target.value = '';
+    };
+    reader.readAsBinaryString(file);
+  };
+
   const saveStaff = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingStaff?.name) return;
@@ -1347,9 +1732,111 @@ function TeacherView({ staff, jobTitles, departments, classes, sessions }: {
   };
 
   return (
-    <div className="flex gap-6 h-[calc(100vh-100px)]">
-      {/* Left: Staff List */}
-      <div className="w-1/3 bg-white rounded-[32px] border border-black/5 shadow-sm flex flex-col overflow-hidden">
+    <div className="flex flex-col h-[calc(100vh-100px)] gap-4">
+      {/* Sub-navigation */}
+      <div className="flex gap-4 border-b border-black/5 pb-2">
+        <button 
+          onClick={() => setSubTab('summary')}
+          className={cn(
+            "px-4 py-2 text-sm font-bold transition-all rounded-xl",
+            subTab === 'summary' ? "bg-blue-600 text-white shadow-md" : "text-black/40 hover:bg-black/5"
+          )}
+        >
+          Summary Table
+        </button>
+        <button 
+          onClick={() => setSubTab('details')}
+          className={cn(
+            "px-4 py-2 text-sm font-bold transition-all rounded-xl",
+            subTab === 'details' ? "bg-blue-600 text-white shadow-md" : "text-black/40 hover:bg-black/5"
+          )}
+        >
+          Staff Details
+        </button>
+        <button 
+          onClick={() => setSubTab('leave')}
+          className={cn(
+            "px-4 py-2 text-sm font-bold transition-all rounded-xl",
+            subTab === 'leave' ? "bg-blue-600 text-white shadow-md" : "text-black/40 hover:bg-black/5"
+          )}
+        >
+          Leave Management
+        </button>
+      </div>
+
+      {subTab === 'summary' ? (
+        <div className="flex-1 bg-white rounded-[32px] border border-black/5 shadow-sm overflow-hidden flex flex-col">
+          <div className="p-6 border-b border-black/5 flex justify-between items-center bg-gray-50/50">
+            <h2 className="text-xl font-bold flex items-center gap-2">
+              <Grid size={20} className="text-blue-600" />
+              Staff Summary
+            </h2>
+            <div className="flex gap-3 items-center">
+              <button onClick={exportToExcel} className="text-blue-600 hover:text-blue-800 flex items-center gap-1" title="Export to Excel">
+                <Download size={14} />
+                <span className="text-[10px] font-bold uppercase tracking-wider">Export</span>
+              </button>
+              <label className="text-emerald-600 hover:text-emerald-800 flex items-center gap-1 cursor-pointer" title="Import from Excel">
+                <Upload size={14} />
+                <span className="text-[10px] font-bold uppercase tracking-wider">Import</span>
+                <input type="file" accept=".xlsx, .xls" className="hidden" onChange={importFromExcel} />
+              </label>
+            </div>
+          </div>
+          <div className="flex-1 overflow-auto relative">
+            <table className="w-full text-left border-collapse min-w-[2500px]">
+              <thead className="sticky top-0 z-20 bg-gray-100 shadow-sm">
+                <tr>
+                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5 sticky left-0 z-30 bg-gray-100 w-[100px]">Staff ID</th>
+                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5 sticky left-[100px] z-30 bg-gray-100 w-[200px]">Full Name</th>
+                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Status</th>
+                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Gender</th>
+                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Birth Date</th>
+                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Phone</th>
+                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Email</th>
+                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Citizen ID</th>
+                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Social Insurance</th>
+                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Health Insurance</th>
+                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Bank Account</th>
+                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Bank Name</th>
+                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Degrees</th>
+                  <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Address</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-black/5">
+                {sortedStaff.map(s => (
+                  <tr key={s.id} className="hover:bg-black/[0.02] transition-colors group">
+                    <td className="p-4 text-sm font-mono text-blue-600 sticky left-0 z-10 bg-white group-hover:bg-gray-50">{s.staffId || '-'}</td>
+                    <td className="p-4 text-sm font-bold sticky left-[100px] z-10 bg-white group-hover:bg-gray-50">{s.name}</td>
+                    <td className="p-4 text-xs">
+                      <span className={cn(
+                        "px-2 py-1 rounded-full font-bold uppercase tracking-tighter",
+                        s.status === 'Working' ? "bg-emerald-100 text-emerald-600" : "bg-red-100 text-red-600"
+                      )}>
+                        {s.status}
+                      </span>
+                    </td>
+                    <td className="p-4 text-sm">{s.gender}</td>
+                    <td className="p-4 text-sm">{s.birthDate ? format(parseISO(s.birthDate), 'MM/dd/yyyy') : '-'}</td>
+                    <td className="p-4 text-sm">{s.phone || '-'}</td>
+                    <td className="p-4 text-sm">{s.email || '-'}</td>
+                    <td className="p-4 text-sm">{s.citizenId || '-'}</td>
+                    <td className="p-4 text-sm">{s.socialInsuranceId || '-'}</td>
+                    <td className="p-4 text-sm">{s.healthInsuranceId || '-'}</td>
+                    <td className="p-4 text-sm">{s.bankAccount || '-'}</td>
+                    <td className="p-4 text-sm">{s.bankName || '-'}</td>
+                    <td className="p-4 text-sm truncate max-w-[200px]">{s.degrees || '-'}</td>
+                    <td className="p-4 text-sm truncate max-w-[300px]">{s.address || '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : subTab === 'details' ? (
+        <div className="flex gap-6 flex-1 overflow-hidden">
+          {/* Left: Staff List */}
+          <div className="w-1/3 bg-white rounded-[32px] border border-black/5 shadow-sm flex flex-col overflow-hidden">
         <div className="p-6 border-b border-black/5 flex justify-between items-center bg-gray-50/50">
           <div className="flex flex-col gap-1">
             <h2 className="text-xl font-bold flex items-center gap-2">
@@ -1371,11 +1858,17 @@ function TeacherView({ staff, jobTitles, departments, classes, sessions }: {
               >
                 {showResigned ? "Hide Resigned" : "Show All"}
               </button>
-              {staff.some(s => s.staffId === 'NV029') && (
-                <button onClick={fixSpecificStaffId} className="text-[10px] font-bold text-orange-600 hover:underline uppercase tracking-wider">
-                  Fix NV029
+              <div className="flex items-center gap-2 ml-2 border-l border-black/10 pl-2">
+                <button onClick={exportToExcel} className="text-blue-600 hover:text-blue-800 flex items-center gap-1" title="Export to Excel">
+                  <Download size={14} />
+                  <span className="text-[10px] font-bold uppercase tracking-wider">Export</span>
                 </button>
-              )}
+                <label className="text-emerald-600 hover:text-emerald-800 flex items-center gap-1 cursor-pointer" title="Import from Excel">
+                  <Upload size={14} />
+                  <span className="text-[10px] font-bold uppercase tracking-wider">Import</span>
+                  <input type="file" accept=".xlsx, .xls" className="hidden" onChange={importFromExcel} />
+                </label>
+              </div>
             </div>
           </div>
           <Button 
@@ -1612,13 +2105,27 @@ function TeacherView({ staff, jobTitles, departments, classes, sessions }: {
             </div>
           </form>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-center p-12 opacity-30">
-            <Users size={48} className="mb-4" />
-            <p className="text-sm font-medium">Select a staff member to edit or click "Add Staff" to create a new one.</p>
+          <div className="flex-1 flex flex-col items-center justify-center text-black/20 p-12 text-center">
+            <div className="w-24 h-24 bg-black/[0.02] rounded-full flex items-center justify-center mb-4">
+              <Users size={48} />
+            </div>
+            <h3 className="text-xl font-bold text-black/40">Select a staff member</h3>
+            <p className="text-sm max-w-xs mt-2">Choose someone from the list to view or edit their full profile information.</p>
+            <Button 
+              onClick={() => { setEditingStaff({ status: 'Working', gender: 'Male', jobTitleIds: [], departmentIds: [] }); setIsFormOpen(true); setConfirmDelete(false); }}
+              variant="outline"
+              className="mt-6"
+            >
+              <Plus size={16} className="mr-2" /> Add New Staff
+            </Button>
           </div>
         )}
       </div>
     </div>
+  ) : (
+    <LeaveManagementView staff={staff} leaveUsage={leaveUsage} />
+  )}
+</div>
   );
 }
 

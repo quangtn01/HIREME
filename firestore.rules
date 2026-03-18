@@ -52,5 +52,11 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow write: if isAdmin();
     }
+
+    // Leave Usage
+    match /leaveUsage/{leaveId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
   }
 }

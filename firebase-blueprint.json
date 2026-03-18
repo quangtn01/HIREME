@@ -114,6 +114,18 @@
         "weekStart": { "type": "string", "description": "Monday of the week (YYYY-MM-DD) for easier filtering" }
       },
       "required": ["classId", "teacherId", "campusId", "room", "startTime", "endTime", "weekStart"]
+    },
+    "LeaveUsage": {
+      "title": "Leave Usage",
+      "description": "A record of staff leave usage.",
+      "type": "object",
+      "properties": {
+        "staffId": { "type": "string", "description": "ID of the staff member" },
+        "date": { "type": "string", "description": "Date of leave (YYYY-MM-DD)" },
+        "days": { "type": "number", "description": "Number of days taken" },
+        "reason": { "type": "string", "description": "Reason for leave" }
+      },
+      "required": ["staffId", "date", "days"]
     }
   },
   "firestore": {
@@ -123,6 +135,7 @@
     "programs": { "schema": "Program", "description": "Collection of study programs" },
     "jobTitles": { "schema": "JobTitle", "description": "Collection of job titles" },
     "departments": { "schema": "Department", "description": "Collection of departments" },
-    "sessions": { "schema": "Session", "description": "Collection of scheduled sessions" }
+    "sessions": { "schema": "Session", "description": "Collection of scheduled sessions" },
+    "leaveUsage": { "schema": "LeaveUsage", "description": "Collection of leave usage records" }
   }
 }
