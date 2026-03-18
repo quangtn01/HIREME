@@ -50,7 +50,7 @@ import {
   X,
   Edit2
 } from 'lucide-react';
-import { format, startOfWeek, addDays, parseISO, isSameDay, addWeeks, subWeeks, addMinutes } from 'date-fns';
+import { format, startOfWeek, addDays, parseISO, isSameDay, addWeeks, subWeeks, addMinutes, addMonths, subMonths, startOfMonth, endOfMonth, differenceInDays, isAfter, isBefore, isWithinInterval } from 'date-fns';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -1022,9 +1022,10 @@ function ManagementView({ campuses, programs, jobTitles, departments }: { campus
 
   const saveCampus = async () => {
     if (!newCampus.name || !newCampus.rooms) return;
+    const rooms = String(newCampus.rooms || '').split(',').map(r => r.trim()).filter(r => r);
     const data = {
       name: newCampus.name,
-      rooms: newCampus.rooms.split(',').map(r => r.trim()).filter(r => r)
+      rooms: rooms
     };
     if (newCampus.id) {
       await updateDoc(doc(db, 'campuses', newCampus.id), data);
@@ -1118,10 +1119,10 @@ function ManagementView({ campuses, programs, jobTitles, departments }: { campus
               <div key={c.id} className="p-4 bg-black/5 rounded-2xl flex justify-between items-start">
                 <div>
                   <p className="font-bold">{c.name}</p>
-                  <p className="text-xs text-black/40">Rooms: {c.rooms.join(', ')}</p>
+                  <p className="text-xs text-black/40">Rooms: {(c.rooms || []).join(', ')}</p>
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={() => setNewCampus({ id: c.id, name: c.name, rooms: c.rooms.join(', ') })} className="text-emerald-600 hover:text-emerald-700 p-1"><Settings size={16} /></button>
+                  <button onClick={() => setNewCampus({ id: c.id, name: c.name, rooms: (c.rooms || []).join(', ') })} className="text-emerald-600 hover:text-emerald-700 p-1"><Settings size={16} /></button>
                   <button onClick={() => deleteDoc(doc(db, 'campuses', c.id))} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16} /></button>
                 </div>
               </div>
@@ -2131,7 +2132,323 @@ function TeacherView({ staff, jobTitles, departments, classes, sessions, leaveUs
 
 // --- View: Course (Class Management) ---
 
+function CourseDashboard({ classes, programs, staff, campuses }: { classes: Class[], programs: Program[], staff: Staff[], campuses: Campus[] }) {
+  const [baseMonth, setBaseMonth] = useState(startOfMonth(new Date()));
+  const [selectedClass, setSelectedClass] = useState<Class | null>(null);
+
+  const months = [
+    subMonths(baseMonth, 1),
+    baseMonth,
+    addMonths(baseMonth, 1),
+    addMonths(baseMonth, 2),
+  ];
+
+  const startDate = startOfMonth(months[0]);
+  const endDate = endOfMonth(months[3]);
+  const totalDays = differenceInDays(endDate, startDate) + 1;
+
+  const activeClasses = classes.filter(c => {
+    if (c.status === 'Archived') return false;
+    if (!c.startDate || !c.endDate) return false;
+    try {
+      const classEnd = parseISO(c.endDate);
+      return isAfter(classEnd, new Date()) || isSameDay(classEnd, new Date());
+    } catch (e) {
+      return false;
+    }
+  });
+
+  const sortedPrograms = [...programs].sort((a, b) => {
+    if (a.name === "SẮP KHAI GIẢNG") return -1;
+    if (b.name === "SẮP KHAI GIẢNG") return 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  const getProgramColor = (index: number) => {
+    const colors = [
+      'bg-blue-100 text-blue-800 border-blue-200',
+      'bg-purple-100 text-purple-800 border-purple-200',
+      'bg-emerald-100 text-emerald-800 border-emerald-200',
+      'bg-orange-100 text-orange-800 border-orange-200',
+      'bg-pink-100 text-pink-800 border-pink-200',
+      'bg-indigo-100 text-indigo-800 border-indigo-200',
+      'bg-amber-100 text-amber-800 border-amber-200',
+    ];
+    return colors[index % colors.length];
+  };
+
+  const getPosition = (dateStr: string) => {
+    try {
+      const date = parseISO(dateStr);
+      if (isNaN(date.getTime())) return 0;
+      if (isBefore(date, startDate)) return 0;
+      if (isAfter(date, endDate)) return 100;
+      const daysFromStart = differenceInDays(date, startDate);
+      const pos = (daysFromStart / totalDays) * 100;
+      return isNaN(pos) ? 0 : pos;
+    } catch (e) {
+      return 0;
+    }
+  };
+
+  const safeFormat = (dateStr: string, formatStr: string) => {
+    try {
+      const date = parseISO(dateStr);
+      if (isNaN(date.getTime())) return 'N/A';
+      return format(date, formatStr);
+    } catch (e) {
+      return 'N/A';
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-full bg-white rounded-[32px] border border-black/5 shadow-sm overflow-hidden">
+      <div className="p-6 border-b border-black/5 flex justify-between items-center bg-gray-50/50">
+        <div className="flex items-center gap-4">
+          <h2 className="text-xl font-bold flex items-center gap-2">
+            <LayoutDashboard size={20} className="text-blue-600" />
+            Course Timeline
+          </h2>
+          <div className="flex items-center bg-white rounded-xl border border-black/5 p-1">
+            <button onClick={() => setBaseMonth(subMonths(baseMonth, 1))} className="p-1.5 hover:bg-black/5 rounded-lg transition-colors">
+              <ChevronLeft size={16} />
+            </button>
+            <span className="px-4 text-xs font-bold uppercase tracking-wider">
+              {format(baseMonth, 'MMMM yyyy')}
+            </span>
+            <button onClick={() => setBaseMonth(addMonths(baseMonth, 1))} className="p-1.5 hover:bg-black/5 rounded-lg transition-colors">
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        </div>
+        <div className="text-[10px] font-bold text-black/30 uppercase tracking-widest">
+          Showing 4 Months: {format(months[0], 'MMM')} - {format(months[3], 'MMM')}
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-auto p-6">
+        <div className="min-w-[1000px] relative">
+          {/* Timeline Header */}
+          <div className="flex border-b border-black/5 mb-8 sticky top-0 z-20 bg-white/80 backdrop-blur-sm py-2">
+            {months.map(m => (
+              <div key={m.toISOString()} className="flex-1 text-center py-2 border-r border-black/5 last:border-r-0">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-black/40">
+                  {format(m, 'MMMM yyyy')}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* Grid Lines */}
+          <div className="absolute top-10 bottom-0 left-0 right-0 flex pointer-events-none">
+            {months.map(m => (
+              <div key={m.toISOString()} className="flex-1 border-r border-black/[0.03] last:border-r-0" />
+            ))}
+          </div>
+
+          {/* Classes by Program */}
+          <div className="space-y-12 relative z-10">
+            {sortedPrograms.map((program, pIdx) => {
+              const programClasses = activeClasses.filter(c => c.programId === program.id);
+              if (programClasses.length === 0) return null;
+
+              return (
+                <div key={program.id} className="space-y-4">
+                  <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-black/20 sticky left-0">
+                    {program.name}
+                  </h3>
+                  <div className="space-y-6">
+                    {programClasses.map(c => {
+                      const left = getPosition(c.startDate);
+                      const right = getPosition(c.endDate);
+                      const width = Math.max(5, right - left);
+                      const colorClass = getProgramColor(pIdx);
+                      const teacher = staff.find(s => s.staffId === c.teacherId);
+
+                      return (
+                        <div key={c.id} className="relative h-12 flex items-center">
+                          {/* Start Date Label */}
+                          <div 
+                            className="absolute text-[9px] font-mono text-black/30 whitespace-nowrap"
+                            style={{ left: `${left}%`, transform: 'translateX(-110%)' }}
+                          >
+                            {safeFormat(c.startDate, 'dd/MM')}
+                          </div>
+
+                          {/* Bar */}
+                          <div 
+                            onClick={() => setSelectedClass(c)}
+                            className={cn(
+                              "absolute h-10 rounded-xl border shadow-sm cursor-pointer transition-all hover:scale-[1.02] hover:shadow-md flex items-center px-4 overflow-hidden",
+                              colorClass
+                            )}
+                            style={{ left: `${left}%`, width: `${width}%` }}
+                          >
+                            <div className="truncate w-full">
+                              <p className="font-bold text-[11px] truncate">{c.name}</p>
+                              <p className="text-[9px] opacity-70 truncate">{teacher?.name || 'No Teacher'}</p>
+                            </div>
+                          </div>
+
+                          {/* End Date Label */}
+                          <div 
+                            className="absolute text-[9px] font-mono text-black/30 whitespace-nowrap"
+                            style={{ left: `${right}%`, transform: 'translateX(10%)' }}
+                          >
+                            {safeFormat(c.endDate, 'dd/MM')}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Uncategorized */}
+            {activeClasses.filter(c => !c.programId || !programs.find(p => p.id === c.programId)).length > 0 && (
+              <div className="space-y-4">
+                <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-black/20 sticky left-0">
+                  UNCATEGORIZED
+                </h3>
+                <div className="space-y-6">
+                  {activeClasses
+                    .filter(c => !c.programId || !programs.find(p => p.id === c.programId))
+                    .map(c => {
+                      const left = getPosition(c.startDate);
+                      const right = getPosition(c.endDate);
+                      const width = Math.max(5, right - left);
+                      const colorClass = 'bg-gray-100 text-gray-800 border-gray-200';
+                      const teacher = staff.find(s => s.staffId === c.teacherId);
+
+                      return (
+                        <div key={c.id} className="relative h-12 flex items-center">
+                          <div 
+                            className="absolute text-[9px] font-mono text-black/30 whitespace-nowrap"
+                            style={{ left: `${left}%`, transform: 'translateX(-110%)' }}
+                          >
+                            {safeFormat(c.startDate, 'dd/MM')}
+                          </div>
+                          <div 
+                            onClick={() => setSelectedClass(c)}
+                            className={cn(
+                              "absolute h-10 rounded-xl border shadow-sm cursor-pointer transition-all hover:scale-[1.02] hover:shadow-md flex items-center px-4 overflow-hidden",
+                              colorClass
+                            )}
+                            style={{ left: `${left}%`, width: `${width}%` }}
+                          >
+                            <div className="truncate w-full">
+                              <p className="font-bold text-[11px] truncate">{c.name}</p>
+                              <p className="text-[9px] opacity-70 truncate">{teacher?.name || 'No Teacher'}</p>
+                            </div>
+                          </div>
+                          <div 
+                            className="absolute text-[9px] font-mono text-black/30 whitespace-nowrap"
+                            style={{ left: `${right}%`, transform: 'translateX(10%)' }}
+                          >
+                            {safeFormat(c.endDate, 'dd/MM')}
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Detail Modal (Read-only) */}
+      {selectedClass && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/20 backdrop-blur-sm">
+          <div className="bg-white rounded-[40px] shadow-2xl border border-black/5 w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-8 border-b border-black/5 bg-gray-50/50 flex justify-between items-center">
+              <div>
+                <h2 className="text-2xl font-bold">{selectedClass.name}</h2>
+                <p className="text-sm text-black/40 font-medium">Class Details (Read-only)</p>
+              </div>
+              <button onClick={() => setSelectedClass(null)} className="p-2 hover:bg-black/5 rounded-full transition-colors">
+                <X size={24} />
+              </button>
+            </div>
+            <div className="p-8 space-y-6">
+              <div className="grid grid-cols-2 gap-8">
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-black/30 tracking-widest block mb-1">Program</label>
+                  <p className="font-medium">{programs.find(p => p.id === selectedClass.programId)?.name || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-black/30 tracking-widest block mb-1">Status</label>
+                  <span className={cn(
+                    "px-2 py-0.5 rounded-full text-[10px] font-bold uppercase",
+                    selectedClass.status === 'Active' ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-600"
+                  )}>
+                    {selectedClass.status}
+                  </span>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-8">
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-black/30 tracking-widest block mb-1">Teacher</label>
+                  <p className="font-medium">{staff.find(s => s.staffId === selectedClass.teacherId)?.name || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-black/30 tracking-widest block mb-1">TA</label>
+                  <p className="font-medium">{staff.find(s => s.staffId === selectedClass.taId)?.name || 'None'}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-8">
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-black/30 tracking-widest block mb-1">Start Date</label>
+                  <p className="font-medium">{safeFormat(selectedClass.startDate, 'MMMM dd, yyyy')}</p>
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-black/30 tracking-widest block mb-1">End Date</label>
+                  <p className="font-medium">{safeFormat(selectedClass.endDate, 'MMMM dd, yyyy')}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-8">
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-black/30 tracking-widest block mb-1">Học phí theo khóa</label>
+                  <p className="font-medium text-emerald-600">
+                    {selectedClass.tuitionFull ? new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(selectedClass.tuitionFull) : 'N/A'}
+                  </p>
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-black/30 tracking-widest block mb-1">Học phí theo tháng</label>
+                  <p className="font-medium text-emerald-600">
+                    {selectedClass.tuitionMonthly ? new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(selectedClass.tuitionMonthly) : 'N/A'}
+                  </p>
+                </div>
+              </div>
+              {selectedClass.schedule && selectedClass.schedule.length > 0 && (
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-black/30 tracking-widest block mb-2">Weekly Schedule</label>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedClass.schedule.map((item, idx) => (
+                      <div key={idx} className="px-3 py-1.5 bg-black/5 rounded-xl text-[11px] font-medium">
+                        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][item.dayOfWeek]}: {item.slot}
+                        <span className="ml-2 text-black/30 font-normal">
+                          ({campuses.find(cp => cp.id === item.campusId)?.name || 'N/A'} - {item.room || 'N/A'})
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="p-8 bg-gray-50/50 border-t border-black/5 flex justify-end">
+              <Button onClick={() => setSelectedClass(null)} className="bg-black text-white px-8">Close</Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CourseView({ classes, programs, staff, campuses, jobTitles }: { classes: Class[], programs: Program[], staff: Staff[], campuses: Campus[], jobTitles: JobTitle[] }) {
+  const [subTab, setSubTab] = useState<'dashboard' | 'details'>('dashboard');
   const [editingClass, setEditingClass] = useState<Partial<Class> | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
@@ -2202,242 +2519,272 @@ function CourseView({ classes, programs, staff, campuses, jobTitles }: { classes
   });
 
   return (
-    <div className="flex gap-6 h-[calc(100vh-100px)]">
-      {/* Left: Class List grouped by Program */}
-      <div className="w-1/2 bg-white rounded-[32px] border border-black/5 shadow-sm flex flex-col overflow-hidden">
-        <div className="p-6 border-b border-black/5 flex justify-between items-center bg-gray-50/50">
-          <div className="flex flex-col gap-1">
-            <h2 className="text-xl font-bold flex items-center gap-2">
-              <BookOpen size={20} className="text-purple-600" />
-              Classes
-            </h2>
-            <button 
-              onClick={() => setShowArchived(!showArchived)}
-              className={cn(
-                "text-[10px] font-bold uppercase tracking-wider text-left transition-colors",
-                showArchived ? "text-emerald-600" : "text-black/30 hover:text-black/50"
-              )}
-            >
-              {showArchived ? "● Showing All" : "○ Show Archived"}
-            </button>
-          </div>
-          <Button 
-            onClick={() => { setEditingClass({ status: 'Active', schedule: [] }); setIsFormOpen(true); setConfirmDelete(false); }}
-            className="bg-emerald-600 text-white hover:bg-emerald-700 text-xs py-1.5 h-auto"
+    <div className="flex flex-col h-[calc(100vh-100px)] space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-serif italic">Courses</h1>
+        <div className="flex bg-white rounded-2xl border border-black/5 p-1.5 shadow-sm">
+          <button 
+            onClick={() => setSubTab('dashboard')}
+            className={cn(
+              "px-6 py-2 rounded-xl text-xs font-bold transition-all",
+              subTab === 'dashboard' ? "bg-purple-600 text-white shadow-md" : "text-black/40 hover:bg-black/5"
+            )}
           >
-            <Plus size={14} className="mr-1" /> Add Class
-          </Button>
-        </div>
-        <div className="flex-1 overflow-auto p-4 space-y-6">
-          {sortedPrograms.map(program => {
-            const programClasses = filteredClasses
-              .filter(c => c.programId === program.id)
-              .sort((a, b) => a.name.localeCompare(b.name));
-            
-            if (programClasses.length === 0) return null;
-            return (
-              <div key={program.id} className="space-y-2">
-                <h3 className="text-[10px] uppercase tracking-widest font-bold text-black/30 px-2">{program.name}</h3>
-                <div className="space-y-1">
-                  {programClasses.map(c => (
-                    <div 
-                      key={c.id} 
-                      onClick={() => { setEditingClass(c); setIsFormOpen(true); setConfirmDelete(false); }}
-                      className={cn(
-                        "p-3 rounded-xl flex justify-between items-center cursor-pointer transition-all border",
-                        editingClass?.id === c.id ? "bg-emerald-50 border-emerald-200" : "bg-black/[0.02] border-transparent hover:bg-black/[0.05]",
-                        c.status === 'Archived' && "opacity-50"
-                      )}
-                    >
-                      <div>
-                        <p className="font-bold text-sm">{c.name}</p>
-                        <p className="text-[10px] text-black/40">
-                          {staff.find(s => s.staffId === c.teacherId)?.name || 'No Teacher'} • {c.status}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-          {filteredClasses.filter(c => !c.programId || !programs.find(p => p.id === c.programId)).length > 0 && (
-            <div className="space-y-2">
-              <h3 className="text-[10px] uppercase tracking-widest font-bold text-black/30 px-2">Uncategorized</h3>
-              <div className="space-y-1">
-                {filteredClasses
-                  .filter(c => !c.programId || !programs.find(p => p.id === c.programId))
-                  .sort((a, b) => a.name.localeCompare(b.name))
-                  .map(c => (
-                  <div 
-                    key={c.id} 
-                    onClick={() => { setEditingClass(c); setIsFormOpen(true); setConfirmDelete(false); }}
-                    className={cn(
-                      "p-3 rounded-xl flex justify-between items-center cursor-pointer transition-all border",
-                      editingClass?.id === c.id ? "bg-emerald-50 border-emerald-200" : "bg-black/[0.02] border-transparent hover:bg-black/[0.05]"
-                    )}
-                  >
-                    <div>
-                      <p className="font-bold text-sm">{c.name}</p>
-                      <p className="text-[10px] text-black/40">{c.status}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+            Dashboard
+          </button>
+          <button 
+            onClick={() => setSubTab('details')}
+            className={cn(
+              "px-6 py-2 rounded-xl text-xs font-bold transition-all",
+              subTab === 'details' ? "bg-purple-600 text-white shadow-md" : "text-black/40 hover:bg-black/5"
+            )}
+          >
+            Course Details
+          </button>
         </div>
       </div>
 
-      {/* Right: Add/Edit Form */}
-      <div className="w-1/2 bg-white rounded-[32px] border border-black/5 shadow-sm flex flex-col overflow-hidden">
-        {isFormOpen ? (
-          <form onSubmit={saveClass} className="flex flex-col h-full">
-            <div className="p-6 border-b border-black/5 bg-gray-50/50">
-              <h2 className="text-xl font-bold">
-                {editingClass?.id ? 'Edit Class' : 'New Class'}
-              </h2>
-            </div>
-            <div className="flex-1 overflow-auto p-6 space-y-6">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Class Name</label>
-                  <Input required value={editingClass?.name || ''} onChange={e => setEditingClass({...editingClass, name: e.target.value})} placeholder="e.g. IELTS 6.5" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Program</label>
-                  <Select required value={editingClass?.programId || ''} onChange={e => setEditingClass({...editingClass, programId: e.target.value})}>
-                    <option value="">Select Program</option>
-                    {programs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </Select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Teacher</label>
-                  <Select required value={editingClass?.teacherId || ''} onChange={e => setEditingClass({...editingClass, teacherId: e.target.value})}>
-                    <option value="">Select Teacher</option>
-                    {staff.filter(s => s.jobTitleIds?.includes(jobTitles.find(jt => jt.name === 'Teacher')?.id || '') || s.jobTitleIds?.includes(jobTitles.find(jt => jt.name === 'Teacher')?.id || '')).map(s => <option key={s.staffId} value={s.staffId}>{s.staffId} - {s.name}</option>)}
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] uppercase font-bold text-black/40 ml-1">TA (Optional)</label>
-                  <Select value={editingClass?.taId || ''} onChange={e => setEditingClass({...editingClass, taId: e.target.value})}>
-                    <option value="">Select TA</option>
-                    {staff.filter(s => s.jobTitleIds?.includes(jobTitles.find(jt => jt.name === 'TA')?.id || '')).map(s => <option key={s.staffId} value={s.staffId}>{s.staffId} - {s.name}</option>)}
-                  </Select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Start Date</label>
-                  <Input type="date" value={editingClass?.startDate || ''} onChange={e => setEditingClass({...editingClass, startDate: e.target.value})} />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] uppercase font-bold text-black/40 ml-1">End Date (Estimated)</label>
-                  <Input type="date" value={editingClass?.endDate || ''} onChange={e => setEditingClass({...editingClass, endDate: e.target.value})} />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Học phí theo khóa</label>
-                  <Input type="number" value={editingClass?.tuitionFull || ''} onChange={e => setEditingClass({...editingClass, tuitionFull: Number(e.target.value)})} placeholder="VNĐ" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Học phí theo tháng</label>
-                  <Input type="number" value={editingClass?.tuitionMonthly || ''} onChange={e => setEditingClass({...editingClass, tuitionMonthly: Number(e.target.value)})} placeholder="VNĐ" />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Status</label>
-                <Select value={editingClass?.status || 'Active'} onChange={e => setEditingClass({...editingClass, status: e.target.value as any})}>
-                  <option value="Active">Active</option>
-                  <option value="Archived">Archived</option>
-                </Select>
-              </div>
-
-              <div className="space-y-4 pt-4 border-t border-black/5">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-sm font-bold">Weekly Schedule</h3>
-                  <Button type="button" onClick={addScheduleItem} className="text-[10px] py-1 h-auto bg-black/5 hover:bg-black/10">
-                    <Plus size={12} className="mr-1" /> Add Slot
-                  </Button>
-                </div>
-                <div className="space-y-3">
-                  {(editingClass?.schedule || []).map((item, idx) => (
-                    <div key={idx} className="p-4 bg-black/5 rounded-2xl space-y-3 relative group">
-                      <button 
-                        type="button" 
-                        onClick={() => removeScheduleItem(idx)}
-                        className="absolute top-2 right-2 text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                      <div className="grid grid-cols-2 gap-3">
-                        <Select value={item.dayOfWeek} onChange={e => updateScheduleItem(idx, 'dayOfWeek', Number(e.target.value))}>
-                          {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((day, dIdx) => (
-                            <option key={dIdx} value={dIdx}>{day}</option>
-                          ))}
-                        </Select>
-                        <Select value={item.slot} onChange={e => updateScheduleItem(idx, 'slot', e.target.value)}>
-                          <option value="CA CHIỀU 1">CA CHIỀU 1</option>
-                          <option value="CA CHIỀU 2">CA CHIỀU 2</option>
-                          <option value="CA TỐI 1">CA TỐI 1</option>
-                          <option value="CA TỐI 2">CA TỐI 2</option>
-                        </Select>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <Select value={item.campusId} onChange={e => updateScheduleItem(idx, 'campusId', e.target.value)}>
-                          <option value="">Select Campus</option>
-                          {campuses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                        </Select>
-                        <Select value={item.room} onChange={e => updateScheduleItem(idx, 'room', e.target.value)}>
-                          <option value="">Select Room</option>
-                          {campuses.find(c => c.id === item.campusId)?.rooms.map(r => <option key={r} value={r}>{r}</option>)}
-                        </Select>
-                      </div>
-                    </div>
-                  ))}
-                  {(!editingClass?.schedule || editingClass.schedule.length === 0) && (
-                    <p className="text-center text-xs text-black/30 py-4 italic">No schedule items added.</p>
-                  )}
-                </div>
-              </div>
-            </div>
-            <div className="p-6 border-t border-black/5 space-y-3">
-              <div className="flex gap-3">
-                <Button type="button" onClick={() => { setEditingClass(null); setIsFormOpen(false); setConfirmDelete(false); }} className="flex-1 bg-black/5 hover:bg-black/10">Cancel</Button>
-                <Button type="submit" className="flex-1 bg-emerald-600 text-white hover:bg-emerald-700">Save Class</Button>
-              </div>
-              {editingClass?.id && (
+      {subTab === 'dashboard' ? (
+        <CourseDashboard classes={classes} programs={programs} staff={staff} campuses={campuses} />
+      ) : (
+        <div className="flex gap-6 flex-1 overflow-hidden">
+          {/* Left: Class List grouped by Program */}
+          <div className="w-1/2 bg-white rounded-[32px] border border-black/5 shadow-sm flex flex-col overflow-hidden">
+            <div className="p-6 border-b border-black/5 flex justify-between items-center bg-gray-50/50">
+              <div className="flex flex-col gap-1">
+                <h2 className="text-xl font-bold flex items-center gap-2">
+                  <BookOpen size={20} className="text-purple-600" />
+                  Classes
+                </h2>
                 <button 
-                  type="button" 
-                  onClick={deleteClass}
-                  onMouseLeave={() => setConfirmDelete(false)}
+                  onClick={() => setShowArchived(!showArchived)}
                   className={cn(
-                    "w-full py-2 text-xs rounded-xl transition-all flex items-center justify-center gap-2 border",
-                    confirmDelete 
-                      ? "bg-red-600 text-white border-red-600 font-bold animate-pulse" 
-                      : "text-red-400 hover:text-red-600 hover:bg-red-50 border-transparent"
+                    "text-[10px] font-bold uppercase tracking-wider text-left transition-colors",
+                    showArchived ? "text-emerald-600" : "text-black/30 hover:text-black/50"
                   )}
                 >
-                  <Trash2 size={14} />
-                  {confirmDelete ? 'Click again to confirm deletion' : 'Delete Class'}
+                  {showArchived ? "● Showing All" : "○ Show Archived"}
                 </button>
+              </div>
+              <Button 
+                onClick={() => { setEditingClass({ status: 'Active', schedule: [] }); setIsFormOpen(true); setConfirmDelete(false); }}
+                className="bg-emerald-600 text-white hover:bg-emerald-700 text-xs py-1.5 h-auto"
+              >
+                <Plus size={14} className="mr-1" /> Add Class
+              </Button>
+            </div>
+            <div className="flex-1 overflow-auto p-4 space-y-6">
+              {sortedPrograms.map(program => {
+                const programClasses = filteredClasses
+                  .filter(c => c.programId === program.id)
+                  .sort((a, b) => a.name.localeCompare(b.name));
+                
+                if (programClasses.length === 0) return null;
+                return (
+                  <div key={program.id} className="space-y-2">
+                    <h3 className="text-[10px] uppercase tracking-widest font-bold text-black/30 px-2">{program.name}</h3>
+                    <div className="space-y-1">
+                      {programClasses.map(c => (
+                        <div 
+                          key={c.id} 
+                          onClick={() => { setEditingClass(c); setIsFormOpen(true); setConfirmDelete(false); }}
+                          className={cn(
+                            "p-3 rounded-xl flex justify-between items-center cursor-pointer transition-all border",
+                            editingClass?.id === c.id ? "bg-emerald-50 border-emerald-200" : "bg-black/[0.02] border-transparent hover:bg-black/[0.05]",
+                            c.status === 'Archived' && "opacity-50"
+                          )}
+                        >
+                          <div>
+                            <p className="font-bold text-sm">{c.name}</p>
+                            <p className="text-[10px] text-black/40">
+                              {staff.find(s => s.staffId === c.teacherId)?.name || 'No Teacher'} • {c.status}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+              {filteredClasses.filter(c => !c.programId || !programs.find(p => p.id === c.programId)).length > 0 && (
+                <div className="space-y-2">
+                  <h3 className="text-[10px] uppercase tracking-widest font-bold text-black/30 px-2">Uncategorized</h3>
+                  <div className="space-y-1">
+                    {filteredClasses
+                      .filter(c => !c.programId || !programs.find(p => p.id === c.programId))
+                      .sort((a, b) => a.name.localeCompare(b.name))
+                      .map(c => (
+                      <div 
+                        key={c.id} 
+                        onClick={() => { setEditingClass(c); setIsFormOpen(true); setConfirmDelete(false); }}
+                        className={cn(
+                          "p-3 rounded-xl flex justify-between items-center cursor-pointer transition-all border",
+                          editingClass?.id === c.id ? "bg-emerald-50 border-emerald-200" : "bg-black/[0.02] border-transparent hover:bg-black/[0.05]"
+                        )}
+                      >
+                        <div>
+                          <p className="font-bold text-sm">{c.name}</p>
+                          <p className="text-[10px] text-black/40">{c.status}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
-          </form>
-        ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-center p-12 opacity-30">
-            <BookOpen size={48} className="mb-4" />
-            <p className="text-sm font-medium">Select a class to edit or click "Add Class" to create a new one.</p>
           </div>
-        )}
-      </div>
+
+          {/* Right: Add/Edit Form */}
+          <div className="w-1/2 bg-white rounded-[32px] border border-black/5 shadow-sm flex flex-col overflow-hidden">
+            {isFormOpen ? (
+              <form onSubmit={saveClass} className="flex flex-col h-full">
+                <div className="p-6 border-b border-black/5 bg-gray-50/50">
+                  <h2 className="text-xl font-bold">
+                    {editingClass?.id ? 'Edit Class' : 'New Class'}
+                  </h2>
+                </div>
+                <div className="flex-1 overflow-auto p-6 space-y-6">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Class Name</label>
+                      <Input required value={editingClass?.name || ''} onChange={e => setEditingClass({...editingClass, name: e.target.value})} placeholder="e.g. IELTS 6.5" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Program</label>
+                      <select required className="w-full bg-black/[0.02] border border-black/5 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/20 transition-all" value={editingClass?.programId || ''} onChange={e => setEditingClass({...editingClass, programId: e.target.value})}>
+                        <option value="">Select Program</option>
+                        {programs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Teacher</label>
+                      <select required className="w-full bg-black/[0.02] border border-black/5 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/20 transition-all" value={editingClass?.teacherId || ''} onChange={e => setEditingClass({...editingClass, teacherId: e.target.value})}>
+                        <option value="">Select Teacher</option>
+                        {staff.filter(s => s.jobTitleIds?.includes(jobTitles.find(jt => jt.name === 'Teacher')?.id || '') || s.jobTitleIds?.includes(jobTitles.find(jt => jt.name === 'Teacher')?.id || '')).map(s => <option key={s.staffId} value={s.staffId}>{s.staffId} - {s.name}</option>)}
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase font-bold text-black/40 ml-1">TA (Optional)</label>
+                      <select className="w-full bg-black/[0.02] border border-black/5 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/20 transition-all" value={editingClass?.taId || ''} onChange={e => setEditingClass({...editingClass, taId: e.target.value})}>
+                        <option value="">Select TA</option>
+                        {staff.filter(s => s.jobTitleIds?.includes(jobTitles.find(jt => jt.name === 'TA')?.id || '')).map(s => <option key={s.staffId} value={s.staffId}>{s.staffId} - {s.name}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Start Date</label>
+                      <Input type="date" value={editingClass?.startDate || ''} onChange={e => setEditingClass({...editingClass, startDate: e.target.value})} />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase font-bold text-black/40 ml-1">End Date (Estimated)</label>
+                      <Input type="date" value={editingClass?.endDate || ''} onChange={e => setEditingClass({...editingClass, endDate: e.target.value})} />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Học phí theo khóa</label>
+                      <Input type="number" value={editingClass?.tuitionFull || ''} onChange={e => setEditingClass({...editingClass, tuitionFull: Number(e.target.value)})} placeholder="VNĐ" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Học phí theo tháng</label>
+                      <Input type="number" value={editingClass?.tuitionMonthly || ''} onChange={e => setEditingClass({...editingClass, tuitionMonthly: Number(e.target.value)})} placeholder="VNĐ" />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Status</label>
+                    <select className="w-full bg-black/[0.02] border border-black/5 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/20 transition-all" value={editingClass?.status || 'Active'} onChange={e => setEditingClass({...editingClass, status: e.target.value as any})}>
+                      <option value="Active">Active</option>
+                      <option value="Archived">Archived</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-4 pt-4 border-t border-black/5">
+                    <div className="flex justify-between items-center">
+                      <h3 className="text-sm font-bold">Weekly Schedule</h3>
+                      <Button type="button" onClick={addScheduleItem} className="text-[10px] py-1 h-auto bg-black/5 hover:bg-black/10">
+                        <Plus size={12} className="mr-1" /> Add Slot
+                      </Button>
+                    </div>
+                    <div className="space-y-3">
+                      {(editingClass?.schedule || []).map((item, idx) => (
+                        <div key={idx} className="p-4 bg-black/5 rounded-2xl space-y-3 relative group">
+                          <button 
+                            type="button" 
+                            onClick={() => removeScheduleItem(idx)}
+                            className="absolute top-2 right-2 text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                          <div className="grid grid-cols-2 gap-3">
+                            <select className="w-full bg-white border border-black/5 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-purple-500/20 transition-all" value={item.dayOfWeek} onChange={e => updateScheduleItem(idx, 'dayOfWeek', Number(e.target.value))}>
+                              {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((day, dIdx) => (
+                                <option key={dIdx} value={dIdx}>{day}</option>
+                              ))}
+                            </select>
+                            <select className="w-full bg-white border border-black/5 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-purple-500/20 transition-all" value={item.slot} onChange={e => updateScheduleItem(idx, 'slot', e.target.value)}>
+                              <option value="CA CHIỀU 1">CA CHIỀU 1</option>
+                              <option value="CA CHIỀU 2">CA CHIỀU 2</option>
+                              <option value="CA TỐI 1">CA TỐI 1</option>
+                              <option value="CA TỐI 2">CA TỐI 2</option>
+                            </select>
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <select className="w-full bg-white border border-black/5 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-purple-500/20 transition-all" value={item.campusId} onChange={e => updateScheduleItem(idx, 'campusId', e.target.value)}>
+                              <option value="">Select Campus</option>
+                              {campuses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                            </select>
+                            <select className="w-full bg-white border border-black/5 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-purple-500/20 transition-all" value={item.room} onChange={e => updateScheduleItem(idx, 'room', e.target.value)}>
+                              <option value="">Select Room</option>
+                              {campuses.find(c => c.id === item.campusId)?.rooms?.map(r => <option key={r} value={r}>{r}</option>)}
+                            </select>
+                          </div>
+                        </div>
+                      ))}
+                      {(!editingClass?.schedule || editingClass.schedule.length === 0) && (
+                        <p className="text-center text-xs text-black/30 py-4 italic">No schedule items added.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="p-6 border-t border-black/5 space-y-3">
+                  <div className="flex gap-3">
+                    <Button type="button" onClick={() => { setEditingClass(null); setIsFormOpen(false); setConfirmDelete(false); }} className="flex-1 bg-black/5 hover:bg-black/10">Cancel</Button>
+                    <Button type="submit" className="flex-1 bg-emerald-600 text-white hover:bg-emerald-700">Save Class</Button>
+                  </div>
+                  {editingClass?.id && (
+                    <button 
+                      type="button" 
+                      onClick={deleteClass}
+                      onMouseLeave={() => setConfirmDelete(false)}
+                      className={cn(
+                        "w-full py-2 text-xs rounded-xl transition-all flex items-center justify-center gap-2 border",
+                        confirmDelete 
+                          ? "bg-red-600 text-white border-red-600 font-bold animate-pulse" 
+                          : "text-red-400 hover:text-red-600 hover:bg-red-50 border-transparent"
+                      )}
+                    >
+                      <Trash2 size={14} />
+                      {confirmDelete ? 'Click again to confirm deletion' : 'Delete Class'}
+                    </button>
+                  )}
+                </div>
+              </form>
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center text-center p-12 opacity-30">
+                <BookOpen size={48} className="mb-4" />
+                <p className="text-sm font-medium">Select a class to edit or click "Add Class" to create a new one.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
