@@ -48,7 +48,8 @@ import {
   Upload,
   Check,
   X,
-  Edit2
+  Edit2,
+  Menu
 } from 'lucide-react';
 import { format, startOfWeek, addDays, parseISO, isSameDay, addWeeks, subWeeks, addMinutes, addMonths, subMonths, startOfMonth, endOfMonth, differenceInDays, isAfter, isBefore, isWithinInterval } from 'date-fns';
 import { clsx, type ClassValue } from 'clsx';
@@ -57,6 +58,28 @@ import { twMerge } from 'tailwind-merge';
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
+
+const formatExcelDate = (dateStr: string | undefined) => {
+  if (!dateStr) return '';
+  try {
+    // Handle ISO strings or yyyy-MM-dd strings
+    const date = parseISO(dateStr);
+    return format(date, 'MM/dd/yyyy');
+  } catch (e) {
+    return dateStr;
+  }
+};
+
+const parseExcelDate = (dateStr: string, timeStr: string) => {
+  try {
+    // Expecting mm/dd/yyyy
+    const [m, d, y] = dateStr.split('/');
+    const isoDate = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+    return new Date(`${isoDate}T${timeStr}:00`).toISOString();
+  } catch (e) {
+    return null;
+  }
+};
 
 // --- Components ---
 
@@ -129,6 +152,7 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'dashboard2' | 'scheduler' | 'staff' | 'course' | 'teacher' | 'management'>('dashboard');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isTimetableOpen, setIsTimetableOpen] = useState(true);
   const [campuses, setCampuses] = useState<Campus[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
@@ -251,10 +275,25 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f5f5f0] flex">
+    <div className="min-h-screen bg-[#f5f5f0] flex relative">
+      {/* Sidebar Toggle Button (Floating) */}
+      <button 
+        onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+        className={cn(
+          "fixed top-6 z-[60] p-2 bg-white rounded-xl border border-black/5 shadow-sm hover:bg-black/5 transition-all",
+          isSidebarOpen ? "left-[272px]" : "left-6"
+        )}
+        title={isSidebarOpen ? "Collapse Sidebar" : "Expand Sidebar"}
+      >
+        <Menu size={20} className="text-black/60" />
+      </button>
+
       {/* Sidebar */}
-      <aside className="w-64 bg-white border-r border-black/5 flex flex-col">
-        <div className="p-6 border-bottom border-black/5">
+      <aside className={cn(
+        "bg-white border-r border-black/5 flex flex-col transition-all duration-300 overflow-hidden",
+        isSidebarOpen ? "w-64" : "w-0 border-none"
+      )}>
+        <div className="p-6 border-bottom border-black/5 whitespace-nowrap">
           <h2 className="text-xl font-serif italic">Hireme Center</h2>
         </div>
         
@@ -401,6 +440,7 @@ function SessionModal({ isOpen, onClose, editingSession, setEditingSession, camp
   classes: Class[],
   jobTitles: JobTitle[]
 }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const activeClasses = classes
     .filter(c => c.status === 'Active')
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -429,6 +469,17 @@ function SessionModal({ isOpen, onClose, editingSession, setEditingSession, camp
       await addDoc(collection(db, 'sessions'), data);
     }
     onClose();
+  };
+
+  const handleDelete = async () => {
+    if (!editingSession?.id) return;
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      return;
+    }
+    await deleteDoc(doc(db, 'sessions', editingSession.id));
+    onClose();
+    setConfirmDelete(false);
   };
 
   return (
@@ -502,9 +553,27 @@ function SessionModal({ isOpen, onClose, editingSession, setEditingSession, camp
             />
           </div>
 
-          <div className="flex gap-3 pt-4">
-            <Button type="button" onClick={onClose} className="flex-1 bg-black/5 hover:bg-black/10">Cancel</Button>
-            <Button type="submit" className="flex-1 bg-emerald-600 text-white hover:bg-emerald-700">Save Session</Button>
+          <div className="space-y-3 pt-4">
+            <div className="flex gap-3">
+              <Button type="button" onClick={onClose} className="flex-1 bg-black/5 hover:bg-black/10">Cancel</Button>
+              <Button type="submit" className="flex-1 bg-emerald-600 text-white hover:bg-emerald-700">Save Session</Button>
+            </div>
+            {editingSession?.id && (
+              <button 
+                type="button" 
+                onClick={handleDelete}
+                onMouseLeave={() => setConfirmDelete(false)}
+                className={cn(
+                  "w-full py-2 text-xs rounded-xl transition-all flex items-center justify-center gap-2 border",
+                  confirmDelete 
+                    ? "bg-red-600 text-white border-red-600 font-bold animate-pulse" 
+                    : "text-red-400 hover:text-red-600 hover:bg-red-50 border-transparent"
+                )}
+              >
+                <Trash2 size={14} />
+                {confirmDelete ? 'Click again to confirm deletion' : 'Delete Session'}
+              </button>
+            )}
           </div>
         </form>
       </div>
@@ -549,6 +618,36 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
   const campus = campuses.find(c => c.id === selectedCampusId);
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(currentWeek, i));
 
+  const copyPreviousWeek = async () => {
+    const prevWeekStart = format(subWeeks(currentWeek, 1), 'yyyy-MM-dd');
+    const weekStartStr = format(currentWeek, 'yyyy-MM-dd');
+    const prevSessions = sessions.filter(s => s.weekStart === prevWeekStart && s.campusId === selectedCampusId);
+    
+    if (!prevSessions.length) {
+      alert("No sessions found in the previous week for this campus.");
+      return;
+    }
+
+    if (!confirm(`Copy ${prevSessions.length} sessions from last week?`)) return;
+
+    const batch = writeBatch(db);
+    prevSessions.forEach(s => {
+      const { id, ...rest } = s;
+      const newStartTime = addWeeks(parseISO(s.startTime), 1).toISOString();
+      const newEndTime = addWeeks(parseISO(s.endTime), 1).toISOString();
+      
+      const newSessionRef = doc(collection(db, 'sessions'));
+      batch.set(newSessionRef, {
+        ...rest,
+        startTime: newStartTime,
+        endTime: newEndTime,
+        weekStart: weekStartStr
+      });
+    });
+
+    await batch.commit();
+  };
+
   const handleDoubleClick = (day: Date, slot: typeof SLOTS[0], room: string) => {
     const dateStr = format(day, 'yyyy-MM-dd');
     const startTime = new Date(`${dateStr}T${slot.start}:00`).toISOString();
@@ -565,6 +664,103 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
     });
   };
 
+  const exportToExcel = () => {
+    const weekSessions = sessions.filter(s => 
+      s.campusId === selectedCampusId && 
+      isWithinInterval(parseISO(s.startTime), {
+        start: currentWeek,
+        end: addDays(currentWeek, 6)
+      })
+    ).sort((a, b) => a.startTime.localeCompare(b.startTime));
+
+    const dataToExport = weekSessions.map(s => {
+      const cls = classes.find(c => c.id === s.classId);
+      const teacher = staff.find(st => st.staffId === s.teacherId);
+      const ta = staff.find(st => st.staffId === s.taId);
+      const campus = campuses.find(c => c.id === s.campusId);
+
+      return {
+        'ID (System)': s.id,
+        'Date': formatExcelDate(s.startTime),
+        'Start Time': format(parseISO(s.startTime), 'HH:mm'),
+        'End Time': format(parseISO(s.endTime), 'HH:mm'),
+        'Campus': campus?.name || '',
+        'Room': s.room || '',
+        'Class': cls?.name || '',
+        'Teacher ID': s.teacherId || '',
+        'Teacher Name': teacher?.name || '',
+        'TA ID': s.taId || '',
+        'TA Name': ta?.name || '',
+        'Zoom ID': s.zoomId || '',
+        'Notes': s.notes || ''
+      };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(dataToExport);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Timetable");
+    XLSX.writeFile(wb, `Timetable_${campus?.name || 'Campus'}_${format(currentWeek, 'yyyy-MM-dd')}.xlsx`);
+  };
+
+  const importFromExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      const bstr = evt.target?.result;
+      const wb = XLSX.read(bstr, { type: 'binary' });
+      const wsname = wb.SheetNames[0];
+      const ws = wb.Sheets[wsname];
+      const data = XLSX.utils.sheet_to_json(ws) as any[];
+
+      const batch = writeBatch(db);
+      
+      for (const row of data) {
+        let startTime = '';
+        let endTime = '';
+        if (row['Date'] && row['Start Time'] && row['End Time']) {
+          const parsedStart = parseExcelDate(row['Date'], row['Start Time']);
+          const parsedEnd = parseExcelDate(row['Date'], row['End Time']);
+          if (parsedStart && parsedEnd) {
+            startTime = parsedStart;
+            endTime = parsedEnd;
+          }
+        }
+
+        if (!startTime) continue;
+
+        const weekStart = format(startOfWeek(parseISO(startTime), { weekStartsOn: 1 }), 'yyyy-MM-dd');
+
+        const sessionData: any = {
+          campusId: selectedCampusId,
+          room: row['Room'] || '',
+          classId: classes.find(c => c.name === row['Class'])?.id || '',
+          teacherId: row['Teacher ID'] || '',
+          taId: row['TA ID'] || '',
+          zoomId: row['Zoom ID'] || '',
+          notes: row['Notes'] || '',
+          startTime,
+          endTime,
+          weekStart
+        };
+
+        const systemId = row['ID (System)'];
+        if (systemId) {
+          batch.update(doc(db, 'sessions', systemId), sessionData);
+        } else {
+          const newDoc = doc(collection(db, 'sessions'));
+          batch.set(newDoc, sessionData);
+        }
+      }
+
+      await batch.commit();
+      alert("Import complete!");
+      e.target.value = '';
+    };
+    reader.readAsBinaryString(file);
+  };
+
   if (!campuses.length) return <EmptyState message="No campuses found. Please add one in Management." />;
 
   return (
@@ -572,6 +768,20 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-serif italic">Campus Dashboard</h1>
         <div className="flex items-center gap-4">
+          <Button onClick={copyPreviousWeek} className="bg-white border border-black/10 hover:bg-black/5 flex items-center gap-2 text-xs py-2 px-3">
+            <Copy size={16} />
+            Copy Last Week
+          </Button>
+          <div className="flex items-center gap-2 bg-white rounded-xl border border-black/5 p-1 px-2 shadow-sm">
+            <Button onClick={exportToExcel} className="p-2 text-black/60 hover:text-emerald-600 transition-colors flex items-center gap-2 text-xs">
+              <Download size={16} /> Export
+            </Button>
+            <div className="w-px h-4 bg-black/10" />
+            <label className="p-2 text-black/60 hover:text-emerald-600 transition-colors flex items-center gap-2 text-xs cursor-pointer">
+              <Upload size={16} /> Import
+              <input type="file" accept=".xlsx, .xls" className="hidden" onChange={importFromExcel} />
+            </label>
+          </div>
           <Button 
             onClick={() => onAddSession({})}
             className="bg-emerald-600 text-white hover:bg-emerald-700 flex items-center gap-2"
@@ -1602,12 +1812,12 @@ function TeacherView({ staff, jobTitles, departments, classes, sessions, leaveUs
       'Full Name': s.name,
       'Status': s.status,
       'Gender': s.gender,
-      'Birth Date': s.birthDate,
+      'Birth Date': formatExcelDate(s.birthDate),
       'Phone': s.phone,
       'Email': s.email,
       'Address': s.address,
       'Citizen ID': s.citizenId,
-      'Citizen ID Date': s.citizenIdDate,
+      'Citizen ID Date': formatExcelDate(s.citizenIdDate),
       'Social Insurance ID': s.socialInsuranceId,
       'Health Insurance ID': s.healthInsuranceId,
       'Children Count': s.childrenCount,
@@ -2226,10 +2436,10 @@ function CourseDashboard({ classes, programs, staff, campuses }: { classes: Clas
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto p-6">
+      <div className="flex-1 overflow-auto">
         <div className="min-w-[1000px] relative">
           {/* Timeline Header */}
-          <div className="flex border-b border-black/5 mb-8 sticky top-0 z-20 bg-white/80 backdrop-blur-sm py-2">
+          <div className="flex border-b border-black/5 sticky top-0 z-20 bg-white py-2 px-6 shadow-sm">
             {months.map(m => (
               <div key={m.toISOString()} className="flex-1 text-center py-2 border-r border-black/5 last:border-r-0">
                 <span className="text-[10px] font-bold uppercase tracking-widest text-black/40">
@@ -2239,16 +2449,17 @@ function CourseDashboard({ classes, programs, staff, campuses }: { classes: Clas
             ))}
           </div>
 
-          {/* Grid Lines */}
-          <div className="absolute top-10 bottom-0 left-0 right-0 flex pointer-events-none">
-            {months.map(m => (
-              <div key={m.toISOString()} className="flex-1 border-r border-black/[0.03] last:border-r-0" />
-            ))}
-          </div>
+          <div className="p-6 pt-4">
+            {/* Grid Lines */}
+            <div className="absolute top-14 bottom-0 left-6 right-6 flex pointer-events-none">
+              {months.map(m => (
+                <div key={m.toISOString()} className="flex-1 border-r border-black/[0.03] last:border-r-0" />
+              ))}
+            </div>
 
-          {/* Classes by Program */}
-          <div className="space-y-12 relative z-10">
-            {sortedPrograms.map((program, pIdx) => {
+            {/* Classes by Program */}
+            <div className="space-y-12 relative z-10">
+              {sortedPrograms.map((program, pIdx) => {
               const programClasses = activeClasses.filter(c => c.programId === program.id);
               if (programClasses.length === 0) return null;
 
@@ -2357,6 +2568,7 @@ function CourseDashboard({ classes, programs, staff, campuses }: { classes: Clas
           </div>
         </div>
       </div>
+      </div>
 
       {/* Detail Modal (Read-only) */}
       {selectedClass && (
@@ -2453,6 +2665,88 @@ function CourseView({ classes, programs, staff, campuses, jobTitles }: { classes
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const exportToExcel = () => {
+    const filteredClasses = showArchived ? classes : classes.filter(c => c.status === 'Active');
+    const dataToExport = filteredClasses.map(c => {
+      const program = programs.find(p => p.id === c.programId);
+      const teacher = staff.find(s => s.staffId === c.teacherId);
+      const ta = staff.find(s => s.staffId === c.taId);
+
+      return {
+        'ID (System)': c.id,
+        'Class Name': c.name,
+        'Program': program?.name || '',
+        'Status': c.status,
+        'Teacher ID': c.teacherId || '',
+        'Teacher Name': teacher?.name || '',
+        'TA ID': c.taId || '',
+        'TA Name': ta?.name || '',
+        'Start Date': formatExcelDate(c.startDate),
+        'End Date': formatExcelDate(c.endDate),
+        'Tuition Full': c.tuitionFull,
+        'Tuition Monthly': c.tuitionMonthly,
+        'Schedule': JSON.stringify(c.schedule)
+      };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(dataToExport);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Courses");
+    XLSX.writeFile(wb, `Courses_${showArchived ? 'All' : 'Active'}_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
+  };
+
+  const importFromExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      const bstr = evt.target?.result;
+      const wb = XLSX.read(bstr, { type: 'binary' });
+      const wsname = wb.SheetNames[0];
+      const ws = wb.Sheets[wsname];
+      const data = XLSX.utils.sheet_to_json(ws) as any[];
+
+      const batch = writeBatch(db);
+      
+      for (const row of data) {
+        const parseDate = (d: string) => {
+          if (!d) return '';
+          const [m, day, y] = d.split('/');
+          return `${y}-${m.padStart(2, '0')}-${day.padStart(2, '0')}`;
+        };
+
+        const classData: any = {
+          name: row['Class Name'] || '',
+          programId: programs.find(p => p.name === row['Program'])?.id || '',
+          status: row['Status'] || 'Active',
+          teacherId: row['Teacher ID'] || '',
+          taId: row['TA ID'] || '',
+          startDate: parseDate(row['Start Date']),
+          endDate: parseDate(row['End Date']),
+          tuitionFull: Number(row['Tuition Full']) || 0,
+          tuitionMonthly: Number(row['Tuition Monthly']) || 0,
+          schedule: row['Schedule'] ? JSON.parse(row['Schedule']) : []
+        };
+
+        const systemId = row['ID (System)'];
+        if (systemId) {
+          batch.update(doc(db, 'classes', systemId), classData);
+        } else {
+          if (classData.name) {
+            const newDoc = doc(collection(db, 'classes'));
+            batch.set(newDoc, classData);
+          }
+        }
+      }
+
+      await batch.commit();
+      alert("Import complete!");
+      e.target.value = '';
+    };
+    reader.readAsBinaryString(file);
+  };
 
   const saveClass = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2566,12 +2860,24 @@ function CourseView({ classes, programs, staff, campuses, jobTitles }: { classes
                   {showArchived ? "● Showing All" : "○ Show Archived"}
                 </button>
               </div>
-              <Button 
-                onClick={() => { setEditingClass({ status: 'Active', schedule: [] }); setIsFormOpen(true); setConfirmDelete(false); }}
-                className="bg-emerald-600 text-white hover:bg-emerald-700 text-xs py-1.5 h-auto"
-              >
-                <Plus size={14} className="mr-1" /> Add Class
-              </Button>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center bg-white rounded-xl border border-black/5 p-1 px-2 shadow-sm mr-2">
+                  <Button onClick={exportToExcel} className="p-2 text-black/60 hover:text-emerald-600 transition-colors flex items-center gap-2 text-[10px] font-bold uppercase">
+                    <Download size={14} /> Export
+                  </Button>
+                  <div className="w-px h-4 bg-black/10" />
+                  <label className="p-2 text-black/60 hover:text-emerald-600 transition-colors flex items-center gap-2 text-[10px] font-bold uppercase cursor-pointer">
+                    <Upload size={14} /> Import
+                    <input type="file" accept=".xlsx, .xls" className="hidden" onChange={importFromExcel} />
+                  </label>
+                </div>
+                <Button 
+                  onClick={() => { setEditingClass({ status: 'Active', schedule: [] }); setIsFormOpen(true); setConfirmDelete(false); }}
+                  className="bg-emerald-600 text-white hover:bg-emerald-700 text-xs py-1.5 h-auto"
+                >
+                  <Plus size={14} className="mr-1" /> Add Class
+                </Button>
+              </div>
             </div>
             <div className="flex-1 overflow-auto p-4 space-y-6">
               {sortedPrograms.map(program => {
