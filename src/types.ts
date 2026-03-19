@@ -85,3 +85,21 @@ export interface LeaveUsage {
   days: number;
   reason?: string;
 }
+
+export interface Student {
+  id: string;
+  studentId: string; // HV000001
+  name: string;
+  nickname?: string;
+  status: 'Study' | 'Trial' | 'Pending' | 'Done';
+  gender?: 'Male' | 'Female' | 'Other';
+  birthYear?: number;
+  phone?: string;
+  classIds: string[]; // Many classes
+  email?: string;
+  facebook?: string;
+  school?: string;
+  parentName?: string;
+  parentPhone?: string;
+  note?: string;
+}

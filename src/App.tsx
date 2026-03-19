@@ -24,7 +24,8 @@ import {
 } from 'firebase/auth';
 import { db, auth } from './firebase';
 import * as XLSX from 'xlsx';
-import { Campus, Staff, Class, Session, Program, ScheduleItem, JobTitle, Department, LeaveUsage } from './types';
+import { Campus, Staff, Class, Session, Program, ScheduleItem, JobTitle, Department, LeaveUsage, Student } from './types';
+import { StudentView } from './StudentView';
 import { 
   LayoutDashboard, 
   Grid,
@@ -49,7 +50,8 @@ import {
   Check,
   X,
   Edit2,
-  Menu
+  Menu,
+  Search
 } from 'lucide-react';
 import { format, startOfWeek, addDays, parseISO, isSameDay, addWeeks, subWeeks, addMinutes, addMonths, subMonths, startOfMonth, endOfMonth, differenceInDays, isAfter, isBefore, isWithinInterval } from 'date-fns';
 import { clsx, type ClassValue } from 'clsx';
@@ -151,12 +153,13 @@ const SessionTimePicker = ({ startTime, endTime, onChange }: { startTime: string
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'dashboard2' | 'scheduler' | 'staff' | 'course' | 'teacher' | 'management'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'dashboard2' | 'staff' | 'course' | 'student' | 'teacher' | 'management'>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isTimetableOpen, setIsTimetableOpen] = useState(true);
   const [campuses, setCampuses] = useState<Campus[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [classes, setClasses] = useState<Class[]>([]);
+  const [students, setStudents] = useState<Student[]>([]);
   const [programs, setPrograms] = useState<Program[]>([]);
   const [jobTitles, setJobTitles] = useState<JobTitle[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -215,6 +218,9 @@ export default function App() {
     const unsubClasses = onSnapshot(collection(db, 'classes'), (snap) => {
       setClasses(snap.docs.map(d => ({ id: d.id, ...d.data() } as Class)));
     });
+    const unsubStudents = onSnapshot(collection(db, 'students'), (snap) => {
+      setStudents(snap.docs.map(d => ({ id: d.id, ...d.data() } as Student)));
+    });
     const unsubPrograms = onSnapshot(collection(db, 'programs'), (snap) => {
       setPrograms(snap.docs.map(d => ({ id: d.id, ...d.data() } as Program)));
     });
@@ -235,6 +241,7 @@ export default function App() {
       unsubCampuses();
       unsubStaff();
       unsubClasses();
+      unsubStudents();
       unsubPrograms();
       unsubJobTitles();
       unsubDepartments();
@@ -312,15 +319,15 @@ export default function App() {
             
             {isTimetableOpen && (
               <div className="mt-1 ml-4 space-y-1 border-l-2 border-black/5 pl-2">
-                <NavItem icon={<LayoutDashboard size={16} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
-                <NavItem icon={<Grid size={16} />} label="Office View" active={activeTab === 'dashboard2'} onClick={() => setActiveTab('dashboard2')} />
                 <NavItem icon={<Users size={16} />} label="Staff View" active={activeTab === 'staff'} onClick={() => setActiveTab('staff')} />
-                <NavItem icon={<Calendar size={16} />} label="Scheduler" active={activeTab === 'scheduler'} onClick={() => setActiveTab('scheduler')} />
+                <NavItem icon={<Grid size={16} />} label="Office View" active={activeTab === 'dashboard2'} onClick={() => setActiveTab('dashboard2')} />
+                <NavItem icon={<LayoutDashboard size={16} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
               </div>
             )}
           </div>
 
           <NavItem icon={<BookOpen size={18} />} label="Course" active={activeTab === 'course'} onClick={() => setActiveTab('course')} />
+          <NavItem icon={<GraduationCap size={18} />} label="Student" active={activeTab === 'student'} onClick={() => setActiveTab('student')} />
           <NavItem icon={<Users size={18} />} label="Teacher" active={activeTab === 'teacher'} onClick={() => setActiveTab('teacher')} />
           <NavItem icon={<Settings size={18} />} label="Management" active={activeTab === 'management'} onClick={() => setActiveTab('management')} />
         </nav>
@@ -366,18 +373,6 @@ export default function App() {
             }}
           />
         )}
-        {activeTab === 'scheduler' && (
-          <SchedulerView 
-            campuses={campuses} 
-            staff={staff} 
-            classes={classes} 
-            sessions={sessions} 
-            isModalOpen={isModalOpen}
-            setIsModalOpen={setIsModalOpen}
-            editingSession={editingSession}
-            setEditingSession={setEditingSession}
-          />
-        )}
         {activeTab === 'staff' && (
           <StaffView 
             staff={staff} 
@@ -393,6 +388,12 @@ export default function App() {
         )}
         {activeTab === 'course' && (
           <CourseView classes={classes} programs={programs} staff={staff} campuses={campuses} jobTitles={jobTitles} />
+        )}
+        {activeTab === 'student' && (
+          <StudentView 
+            students={students}
+            classes={classes}
+          />
         )}
         {activeTab === 'teacher' && (
           <TeacherView 
@@ -1697,6 +1698,7 @@ function LeaveManagementView({ staff, leaveUsage }: { staff: Staff[], leaveUsage
     </div>
   );
 }
+
 
 function TeacherView({ staff, jobTitles, departments, classes, sessions, leaveUsage }: { 
   staff: Staff[], 

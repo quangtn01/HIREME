@@ -126,6 +126,28 @@
         "reason": { "type": "string", "description": "Reason for leave" }
       },
       "required": ["staffId", "date", "days"]
+    },
+    "Student": {
+      "title": "Student",
+      "description": "A student enrolled in the center.",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "description": "Student ID (HV000001, HV000002...)" },
+        "name": { "type": "string", "description": "Full name" },
+        "nickname": { "type": "string", "description": "Nickname" },
+        "status": { "type": "string", "enum": ["Study", "Trial", "Pending", "Done"], "description": "Current status" },
+        "gender": { "type": "string", "enum": ["Male", "Female", "Other"] },
+        "birthYear": { "type": "number", "description": "Year of birth" },
+        "phone": { "type": "string", "description": "Phone number" },
+        "classIds": { "type": "array", "items": { "type": "string" }, "description": "List of Class IDs" },
+        "email": { "type": "string", "description": "Email address" },
+        "facebook": { "type": "string", "description": "Facebook profile link" },
+        "school": { "type": "string", "description": "Current school" },
+        "parentName": { "type": "string", "description": "Parent's name" },
+        "parentPhone": { "type": "string", "description": "Parent's phone number" },
+        "note": { "type": "string", "description": "Additional notes" }
+      },
+      "required": ["studentId", "name", "status"]
     }
   },
   "firestore": {
@@ -136,6 +158,7 @@
     "jobTitles": { "schema": "JobTitle", "description": "Collection of job titles" },
     "departments": { "schema": "Department", "description": "Collection of departments" },
     "sessions": { "schema": "Session", "description": "Collection of scheduled sessions" },
-    "leaveUsage": { "schema": "LeaveUsage", "description": "Collection of leave usage records" }
+    "leaveUsage": { "schema": "LeaveUsage", "description": "Collection of leave usage records" },
+    "students": { "schema": "Student", "description": "Collection of students" }
   }
 }
