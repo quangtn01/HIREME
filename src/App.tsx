@@ -54,6 +54,7 @@ import {
   Search
 } from 'lucide-react';
 import { format, startOfWeek, addDays, parseISO, isSameDay, addWeeks, subWeeks, addMinutes, addMonths, subMonths, startOfMonth, endOfMonth, differenceInDays, isAfter, isBefore, isWithinInterval } from 'date-fns';
+import { formatInTimeZone, toZonedTime, fromZonedTime } from 'date-fns-tz';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -61,23 +62,184 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-const formatExcelDate = (dateStr: string | undefined) => {
-  if (!dateStr) return '';
+const VIETNAM_TZ = 'Asia/Ho_Chi_Minh';
+
+const safeFormat = (dateStr: any, formatStr: string = 'dd/MM/yyyy', fallback: string = '-') => {
+  if (!dateStr) return fallback;
   try {
-    // Handle ISO strings or yyyy-MM-dd strings
-    const date = parseISO(dateStr);
-    return format(date, 'MM/dd/yyyy');
+    const date = typeof dateStr === 'string' ? parseISO(dateStr) : new Date(dateStr);
+    if (isNaN(date.getTime())) return fallback;
+    // For pure dates (YYYY-MM-DD), we want to avoid timezone shifts
+    if (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      const [y, m, d] = dateStr.split('-').map(Number);
+      const utcDate = new Date(Date.UTC(y, m - 1, d));
+      return formatInTimeZone(utcDate, 'UTC', formatStr);
+    }
+    return formatInTimeZone(date, VIETNAM_TZ, formatStr);
   } catch (e) {
-    return dateStr;
+    return fallback;
   }
 };
 
-const parseExcelDate = (dateStr: string, timeStr: string) => {
+const toDisplayDate = (dateStr: string) => {
+  if (!dateStr) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    const [y, m, d] = dateStr.split('-');
+    return `${d}/${m}/${y}`;
+  }
+  return dateStr;
+};
+
+const fromDisplayDate = (dateStr: string) => {
+  if (!dateStr) return '';
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(dateStr)) {
+    const [d, m, y] = dateStr.split('/');
+    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  }
+  return dateStr;
+};
+
+export const getValue = (row: any, keys: string[]) => {
+  for (const key of keys) {
+    if (row[key] !== undefined && row[key] !== null) return row[key];
+  }
+  return undefined;
+};
+
+export const normalizeImportDate = (val: any) => {
+  if (!val) return '';
+  
+  // If it's a JS Date object
+  if (val instanceof Date || (val && typeof val === 'object' && val.constructor.name === 'Date')) {
+    const d = val instanceof Date ? val : new Date(val);
+    if (isNaN(d.getTime())) return '';
+    
+    // Use UTC components to get the date exactly as SheetJS intended (usually midnight UTC)
+    // This avoids off-by-one errors caused by local timezone shifts
+    const y = d.getUTCFullYear();
+    const m = (d.getUTCMonth() + 1).toString().padStart(2, '0');
+    const day = d.getUTCDate().toString().padStart(2, '0');
+    
+    return `${y}-${m}-${day}`;
+  }
+
+  // If it's a number (Excel serial date or Year)
+  if (typeof val === 'number') {
+    // If it's a small number, it's likely just a year (e.g. 2010)
+    if (val > 0 && val < 3000) return String(Math.round(val));
+
+    // Excel date starts from 1899-12-30
+    // 25569 is the number of days between 1899-12-30 and 1970-01-01
+    const date = new Date(Math.round((val - 25569) * 86400 * 1000));
+    if (isNaN(date.getTime())) return '';
+    
+    const y = date.getUTCFullYear();
+    const m = (date.getUTCMonth() + 1).toString().padStart(2, '0');
+    const day = date.getUTCDate().toString().padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  // If it's a string
+  if (typeof val === 'string') {
+    const str = val.trim();
+    if (!str) return '';
+    
+    // Try yyyy-MM-dd
+    if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+      return str.substring(0, 10);
+    }
+    
+    // Try mm/dd/yyyy or dd/mm/yyyy or d/m/yyyy
+    const parts = str.split(/[/.-]/);
+    if (parts.length === 3) {
+      let [p1, p2, p3] = parts;
+      if (p1.length === 4) {
+        // yyyy-mm-dd
+        return `${p1}-${p2.padStart(2, '0')}-${p3.padStart(2, '0')}`;
+      } else if (p3.length === 4) {
+        // mm/dd/yyyy or dd/mm/yyyy
+        const v1 = parseInt(p1);
+        const v2 = parseInt(p2);
+        
+        if (v1 > 12) {
+          // dd/mm/yyyy
+          return `${p3}-${p2.padStart(2, '0')}-${p1.padStart(2, '0')}`;
+        } else if (v2 > 12) {
+          // mm/dd/yyyy
+          return `${p3}-${p1.padStart(2, '0')}-${p2.padStart(2, '0')}`;
+        } else {
+          // Ambiguous, default to dd/mm/yyyy for VN context
+          return `${p3}-${p2.padStart(2, '0')}-${p1.padStart(2, '0')}`;
+        }
+      }
+    }
+  }
+
+  return String(val);
+};
+
+const normalizeImportTime = (val: any) => {
+  if (!val) return '00:00';
+  
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return '00:00';
+    // Use UTC components to avoid timezone shifts
+    const h = val.getUTCHours().toString().padStart(2, '0');
+    const m = val.getUTCMinutes().toString().padStart(2, '0');
+    return `${h}:${m}`;
+  }
+  
+  if (typeof val === 'number') {
+    // Excel time is fraction of a day
+    // We can use a Date object to extract time components in UTC (which is how Excel stores time)
+    const date = new Date(Math.round(val * 86400 * 1000));
+    const h = date.getUTCHours().toString().padStart(2, '0');
+    const m = date.getUTCMinutes().toString().padStart(2, '0');
+    return `${h}:${m}`;
+  }
+  
+  if (typeof val === 'string') {
+    const str = val.trim();
+    if (!str) return '00:00';
+    if (str.includes(':')) {
+      const parts = str.split(':');
+      const h = parts[0].padStart(2, '0');
+      const m = (parts[1] || '00').padStart(2, '0');
+      return `${h}:${m}`;
+    }
+  }
+  
+  return '00:00';
+};
+
+const formatExcelDate = (dateStr: any) => {
+  if (!dateStr) return '';
   try {
-    // Expecting mm/dd/yyyy
-    const [m, d, y] = dateStr.split('/');
-    const isoDate = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
-    return new Date(`${isoDate}T${timeStr}:00`).toISOString();
+    const str = String(dateStr);
+    // For pure dates (YYYY-MM-DD), we want to avoid timezone shifts
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+      const [y, m, d] = str.split('-').map(Number);
+      const utcDate = new Date(Date.UTC(y, m - 1, d));
+      return formatInTimeZone(utcDate, 'UTC', 'dd/MM/yyyy');
+    }
+    const date = parseISO(str);
+    if (isNaN(date.getTime())) return String(dateStr);
+    return formatInTimeZone(date, VIETNAM_TZ, 'dd/MM/yyyy');
+  } catch (e) {
+    return String(dateStr);
+  }
+};
+
+const parseExcelDate = (dateStr: any, timeStr: any) => {
+  try {
+    if (!dateStr) return null;
+    const normalizedDate = normalizeImportDate(dateStr);
+    if (!normalizedDate) return null;
+    
+    const normalizedTime = normalizeImportTime(timeStr);
+    // Interpret the combined date/time as being in Vietnam timezone
+    const zonedDate = fromZonedTime(`${normalizedDate} ${normalizedTime}`, VIETNAM_TZ);
+    return zonedDate.toISOString();
   } catch (e) {
     return null;
   }
@@ -118,7 +280,11 @@ const SessionTimePicker = ({ startTime, endTime, onChange }: { startTime: string
     <div className="space-y-4">
       <div className="space-y-1">
         <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Date</label>
-        <Input type="date" value={dateStr} onChange={e => update(e.target.value, startHour, startMinute, endHour, endMinute)} />
+        <Input 
+          placeholder="dd/mm/yyyy"
+          value={toDisplayDate(dateStr)} 
+          onChange={e => update(fromDisplayDate(e.target.value), startHour, startMinute, endHour, endMinute)} 
+        />
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1">
@@ -683,8 +849,8 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
       return {
         'ID (System)': s.id,
         'Date': formatExcelDate(s.startTime),
-        'Start Time': format(parseISO(s.startTime), 'HH:mm'),
-        'End Time': format(parseISO(s.endTime), 'HH:mm'),
+        'Start Time': safeFormat(s.startTime, 'HH:mm'),
+        'End Time': safeFormat(s.endTime, 'HH:mm'),
         'Campus': campus?.name || '',
         'Room': s.room || '',
         'Class': cls?.name || '',
@@ -709,20 +875,24 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
 
     const reader = new FileReader();
     reader.onload = async (evt) => {
-      const bstr = evt.target?.result;
-      const wb = XLSX.read(bstr, { type: 'binary' });
+      const data = evt.target?.result;
+      const wb = XLSX.read(data, { type: 'array' });
       const wsname = wb.SheetNames[0];
       const ws = wb.Sheets[wsname];
-      const data = XLSX.utils.sheet_to_json(ws) as any[];
+      const jsonData = XLSX.utils.sheet_to_json(ws) as any[];
 
       const batch = writeBatch(db);
       
-      for (const row of data) {
+      for (const row of jsonData) {
         let startTime = '';
         let endTime = '';
-        if (row['Date'] && row['Start Time'] && row['End Time']) {
-          const parsedStart = parseExcelDate(row['Date'], row['Start Time']);
-          const parsedEnd = parseExcelDate(row['Date'], row['End Time']);
+        const dateVal = getValue(row, ['Date', 'Ngày']);
+        const startVal = getValue(row, ['Start Time', 'Giờ bắt đầu']);
+        const endVal = getValue(row, ['End Time', 'Giờ kết thúc']);
+
+        if (dateVal && startVal && endVal) {
+          const parsedStart = parseExcelDate(dateVal, startVal);
+          const parsedEnd = parseExcelDate(dateVal, endVal);
           if (parsedStart && parsedEnd) {
             startTime = parsedStart;
             endTime = parsedEnd;
@@ -735,18 +905,18 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
 
         const sessionData: any = {
           campusId: selectedCampusId,
-          room: row['Room'] || '',
-          classId: classes.find(c => c.name === row['Class'])?.id || '',
-          teacherId: row['Teacher ID'] || '',
-          taId: row['TA ID'] || '',
-          zoomId: row['Zoom ID'] || '',
-          notes: row['Notes'] || '',
+          room: getValue(row, ['Room', 'Phòng']) || '',
+          classId: classes.find(c => c.name === getValue(row, ['Class', 'Lớp']))?.id || '',
+          teacherId: getValue(row, ['Teacher ID', 'Mã GV']) || '',
+          taId: getValue(row, ['TA ID', 'Mã TA']) || '',
+          zoomId: getValue(row, ['Zoom ID', 'ID Zoom']) || '',
+          notes: getValue(row, ['Notes', 'Ghi chú']) || '',
           startTime,
           endTime,
           weekStart
         };
 
-        const systemId = row['ID (System)'];
+        const systemId = getValue(row, ['ID (System)', 'ID Hệ thống']);
         if (systemId) {
           batch.update(doc(db, 'sessions', systemId), sessionData);
         } else {
@@ -759,7 +929,7 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
       alert("Import complete!");
       e.target.value = '';
     };
-    reader.readAsBinaryString(file);
+    reader.readAsArrayBuffer(file);
   };
 
   if (!campuses.length) return <EmptyState message="No campuses found. Please add one in Management." />;
@@ -792,7 +962,7 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
           </Button>
           <div className="flex items-center bg-white rounded-xl border border-black/5 p-1">
             <button onClick={() => setCurrentWeek(subWeeks(currentWeek, 1))} className="p-2 hover:bg-black/5 rounded-lg"><ChevronLeft size={16} /></button>
-            <span className="px-4 text-sm font-medium">Week of {format(currentWeek, 'MMM d, yyyy')}</span>
+            <span className="px-4 text-sm font-medium">Week of {format(currentWeek, 'dd/MM/yyyy')}</span>
             <button onClick={() => setCurrentWeek(addWeeks(currentWeek, 1))} className="p-2 hover:bg-black/5 rounded-lg"><ChevronRight size={16} /></button>
           </div>
           <Select value={selectedCampusId} onChange={(e) => setSelectedCampusId(e.target.value)} className="w-48">
@@ -812,7 +982,7 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
                   {weekDays.map(day => (
                     <th key={day.toISOString()} className="sticky top-0 bg-[#f8f8f8] p-4 border-r border-b border-black/5 text-center min-w-[140px]">
                       <p className="text-xs font-semibold">{format(day, 'EEEE')}</p>
-                      <p className="text-[10px] text-black/40">{format(day, 'MMM d')}</p>
+                      <p className="text-[10px] text-black/40">{format(day, 'dd/MM/yyyy')}</p>
                     </th>
                   ))}
                 </tr>
@@ -835,7 +1005,7 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
                             s.campusId === campus.id && 
                             s.room === room && 
                             isSameDay(parseISO(s.startTime), day) &&
-                            format(parseISO(s.startTime), 'HH:mm') === slot.start
+                            safeFormat(s.startTime, 'HH:mm') === slot.start
                           );
 
                           return (
@@ -917,7 +1087,7 @@ function Dashboard2View({ campuses, sessions, staff, classes, onAddSession }: {
         <div className="flex items-center gap-4">
           <div className="flex items-center bg-white rounded-xl border border-black/5 p-1">
             <button onClick={() => setCurrentWeek(subWeeks(currentWeek, 1))} className="p-2 hover:bg-black/5 rounded-lg"><ChevronLeft size={16} /></button>
-            <span className="px-4 text-sm font-medium">Week of {format(currentWeek, 'MMM d, yyyy')}</span>
+            <span className="px-4 text-sm font-medium">Week of {format(currentWeek, 'dd/MM/yyyy')}</span>
             <button onClick={() => setCurrentWeek(addWeeks(currentWeek, 1))} className="p-2 hover:bg-black/5 rounded-lg"><ChevronRight size={16} /></button>
           </div>
           <Select value={selectedCampusId} onChange={(e) => setSelectedCampusId(e.target.value)} className="w-48">
@@ -935,7 +1105,7 @@ function Dashboard2View({ campuses, sessions, staff, classes, onAddSession }: {
                 {weekDays.map(day => (
                   <th key={day.toISOString()} className="sticky top-0 bg-[#f8f8f8] p-4 border-r border-b border-black/5 text-center min-w-[180px]">
                     <p className="text-xs font-semibold">{format(day, 'EEEE')}</p>
-                    <p className="text-[10px] text-black/40">{format(day, 'MMM d')}</p>
+                    <p className="text-[10px] text-black/40">{format(day, 'dd/MM/yyyy')}</p>
                   </th>
                 ))}
               </tr>
@@ -954,7 +1124,7 @@ function Dashboard2View({ campuses, sessions, staff, classes, onAddSession }: {
                     const daySessions = sessions.filter(s => 
                       s.campusId === selectedCampusId && 
                       isSameDay(parseISO(s.startTime), day) &&
-                      format(parseISO(s.startTime), 'HH:mm') === slot.start
+                      safeFormat(s.startTime, 'HH:mm') === slot.start
                     );
 
                     return (
@@ -1072,7 +1242,7 @@ function SchedulerView({ campuses, staff, classes, sessions, isModalOpen, setIsM
       <div className="flex items-center gap-4 bg-white p-4 rounded-2xl border border-black/5">
         <div className="flex items-center bg-black/5 rounded-xl p-1">
           <button onClick={() => setCurrentWeek(subWeeks(currentWeek, 1))} className="p-2 hover:bg-black/10 rounded-lg"><ChevronLeft size={16} /></button>
-          <span className="px-4 text-sm font-medium">Week of {format(currentWeek, 'MMM d, yyyy')}</span>
+          <span className="px-4 text-sm font-medium">Week of {format(currentWeek, 'dd/MM/yyyy')}</span>
           <button onClick={() => setCurrentWeek(addWeeks(currentWeek, 1))} className="p-2 hover:bg-black/10 rounded-lg"><ChevronRight size={16} /></button>
         </div>
         <Select value={selectedCampusId} onChange={(e) => setSelectedCampusId(e.target.value)} className="w-48">
@@ -1092,7 +1262,7 @@ function SchedulerView({ campuses, staff, classes, sessions, isModalOpen, setIsM
               <p className="text-[10px] font-mono uppercase tracking-widest text-black/30 mb-2">{s.room}</p>
               <h3 className="font-bold text-lg mb-1">{classes.find(c => c.id === s.classId)?.name || 'Unknown Class'}</h3>
               <p className="text-sm text-black/60 mb-4">
-                {format(parseISO(s.startTime), 'EEEE, HH:mm')} - {format(parseISO(s.endTime), 'HH:mm')}
+                {safeFormat(s.startTime, 'EEEE, HH:mm')} - {safeFormat(s.endTime, 'HH:mm')}
               </p>
               <div className="flex flex-wrap gap-2">
                 <span className="px-2 py-1 bg-emerald-50 text-emerald-700 rounded-lg text-[10px] font-medium">GV: {staff.find(st => st.staffId === s.teacherId)?.name}</span>
@@ -1140,7 +1310,7 @@ function StaffView({ staff, sessions, classes, campuses, jobTitles, onAddSession
         <h1 className="text-3xl font-serif italic">Staff Schedule</h1>
         <div className="flex items-center bg-white rounded-xl border border-black/5 p-1">
           <button onClick={() => setCurrentWeek(subWeeks(currentWeek, 1))} className="p-2 hover:bg-black/5 rounded-lg"><ChevronLeft size={16} /></button>
-          <span className="px-4 text-sm font-medium">Week of {format(currentWeek, 'MMM d, yyyy')}</span>
+          <span className="px-4 text-sm font-medium">Week of {format(currentWeek, 'dd/MM/yyyy')}</span>
           <button onClick={() => setCurrentWeek(addWeeks(currentWeek, 1))} className="p-2 hover:bg-black/5 rounded-lg"><ChevronRight size={16} /></button>
         </div>
       </div>
@@ -1155,7 +1325,7 @@ function StaffView({ staff, sessions, classes, campuses, jobTitles, onAddSession
                 {weekDays.map(day => (
                   <th key={day.toISOString()} className="sticky top-0 bg-[#f8f8f8] p-4 border-r border-b border-black/5 text-center min-w-[140px]">
                     <p className="text-xs font-semibold">{format(day, 'EEEE')}</p>
-                    <p className="text-[10px] text-black/40">{format(day, 'MMM d')}</p>
+                    <p className="text-[10px] text-black/40">{format(day, 'dd/MM/yyyy')}</p>
                   </th>
                 ))}
               </tr>
@@ -1181,7 +1351,7 @@ function StaffView({ staff, sessions, classes, campuses, jobTitles, onAddSession
                         const slotSessions = sessions.filter(s => 
                           (s.teacherId === member.staffId || s.taId === member.staffId) && 
                           isSameDay(parseISO(s.startTime), day) &&
-                          format(parseISO(s.startTime), 'HH:mm') === slot.start
+                          safeFormat(s.startTime, 'HH:mm') === slot.start
                         );
 
                         return (
@@ -1723,7 +1893,7 @@ function TeacherView({ staff, jobTitles, departments, classes, sessions, leaveUs
       
       // Then by staffId
       if (a.staffId && b.staffId) return a.staffId.localeCompare(b.staffId);
-      return a.name.localeCompare(b.name);
+      return (a.name || '').localeCompare(b.name || '');
     });
 
   const generateNextStaffId = () => {
@@ -1735,12 +1905,13 @@ function TeacherView({ staff, jobTitles, departments, classes, sessions, leaveUs
 
   const migrateStaffIds = async () => {
     const batch = writeBatch(db);
-    const alphabetStaff = [...staff].sort((a, b) => a.name.localeCompare(b.name));
+    const alphabetStaff = [...staff].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     
-    const idMap: Record<string, string> = {}; // Old ID -> New Staff ID (NVxxx)
+    const idMap: Record<string, string> = {}; // Old ID/StaffId -> New Staff ID (NVxxx)
 
     alphabetStaff.forEach((s, idx) => {
       const newStaffId = `NV${(idx + 1).toString().padStart(3, '0')}`;
+      if (s.staffId) idMap[s.staffId] = newStaffId;
       idMap[s.id] = newStaffId;
       batch.update(doc(db, 'staff', s.id), { staffId: newStaffId });
     });
@@ -1842,41 +2013,48 @@ function TeacherView({ staff, jobTitles, departments, classes, sessions, leaveUs
 
     const reader = new FileReader();
     reader.onload = async (evt) => {
-      const bstr = evt.target?.result;
-      const wb = XLSX.read(bstr, { type: 'binary' });
+      const data = evt.target?.result;
+      const wb = XLSX.read(data, { type: 'array' });
       const wsname = wb.SheetNames[0];
       const ws = wb.Sheets[wsname];
-      const data = XLSX.utils.sheet_to_json(ws) as any[];
+      const jsonData = XLSX.utils.sheet_to_json(ws) as any[];
 
       const batch = writeBatch(db);
       
-      for (const row of data) {
+      for (const row of jsonData) {
         const staffData: any = {
-          staffId: row['Staff ID'] || '',
-          name: row['Full Name'] || '',
-          status: row['Status'] || 'Working',
-          gender: row['Gender'] || 'Male',
-          birthDate: row['Birth Date'] || '',
-          phone: row['Phone'] || '',
-          email: row['Email'] || '',
-          address: row['Address'] || '',
-          citizenId: row['Citizen ID'] || '',
-          citizenIdDate: row['Citizen ID Date'] || '',
-          socialInsuranceId: row['Social Insurance ID'] || '',
-          healthInsuranceId: row['Health Insurance ID'] || '',
-          childrenCount: Number(row['Children Count']) || 0,
-          emergencyContact: row['Emergency Contact'] || '',
-          degrees: row['Degrees'] || '',
-          certificates: row['Certificates'] || '',
-          bankAccount: row['Bank Account'] || '',
-          bankName: row['Bank Name'] || ''
+          staffId: getValue(row, ['Staff ID', 'Mã nhân viên']) || '',
+          name: getValue(row, ['Full Name', 'Họ và tên']) || '',
+          status: getValue(row, ['Status', 'Trạng thái']) || 'Working',
+          gender: getValue(row, ['Gender', 'Giới tính']) || 'Male',
+          birthDate: normalizeImportDate(getValue(row, ['Birth Date', 'Ngày sinh'])),
+          phone: getValue(row, ['Phone', 'Số điện thoại']) || '',
+          email: getValue(row, ['Email']) || '',
+          address: getValue(row, ['Address', 'Địa chỉ']) || '',
+          citizenId: getValue(row, ['Citizen ID', 'Số CCCD']) || '',
+          citizenIdDate: normalizeImportDate(getValue(row, ['Citizen ID Date', 'Ngày cấp CCCD'])),
+          socialInsuranceId: getValue(row, ['Social Insurance ID', 'Mã số BHXH']) || '',
+          healthInsuranceId: getValue(row, ['Health Insurance ID', 'Mã số BHYT']) || '',
+          childrenCount: Number(getValue(row, ['Children Count', 'Số con'])) || 0,
+          emergencyContact: getValue(row, ['Emergency Contact', 'Liên hệ khẩn cấp']) || '',
+          degrees: getValue(row, ['Degrees', 'Bằng cấp']) || '',
+          certificates: getValue(row, ['Certificates', 'Chứng chỉ']) || '',
+          bankAccount: getValue(row, ['Bank Account', 'Số tài khoản']) || '',
+          bankName: getValue(row, ['Bank Name', 'Ngân hàng']) || ''
         };
 
-        const systemId = row['ID (System)'];
+        const systemId = getValue(row, ['ID (System)', 'ID Hệ thống']);
         if (systemId) {
           batch.update(doc(db, 'staff', systemId), staffData);
         } else {
-          if (staffData.name) {
+          // Check for duplicates by staffId or email
+          const existing = staff.find(s => 
+            (staffData.staffId && s.staffId === staffData.staffId) || 
+            (staffData.email && s.email === staffData.email)
+          );
+          if (existing) {
+            batch.update(doc(db, 'staff', existing.id), staffData);
+          } else if (staffData.name) {
             const newDoc = doc(collection(db, 'staff'));
             batch.set(newDoc, staffData);
           }
@@ -1887,7 +2065,7 @@ function TeacherView({ staff, jobTitles, departments, classes, sessions, leaveUs
       alert("Import complete!");
       e.target.value = '';
     };
-    reader.readAsBinaryString(file);
+    reader.readAsArrayBuffer(file);
   };
 
   const saveStaff = async (e: React.FormEvent) => {
@@ -2030,7 +2208,7 @@ function TeacherView({ staff, jobTitles, departments, classes, sessions, leaveUs
                       </span>
                     </td>
                     <td className="p-4 text-sm">{s.gender}</td>
-                    <td className="p-4 text-sm">{s.birthDate ? format(parseISO(s.birthDate), 'MM/dd/yyyy') : '-'}</td>
+                    <td className="p-4 text-sm">{safeFormat(s.birthDate)}</td>
                     <td className="p-4 text-sm">{s.phone || '-'}</td>
                     <td className="p-4 text-sm">{s.email || '-'}</td>
                     <td className="p-4 text-sm">{s.citizenId || '-'}</td>
@@ -2163,7 +2341,11 @@ function TeacherView({ staff, jobTitles, departments, classes, sessions, leaveUs
                   </div>
                   <div className="space-y-1">
                     <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Birth Date</label>
-                    <Input type="date" value={editingStaff?.birthDate || ''} onChange={e => setEditingStaff({...editingStaff, birthDate: e.target.value})} />
+                    <Input 
+                      placeholder="dd/mm/yyyy"
+                      value={toDisplayDate(editingStaff?.birthDate || '')} 
+                      onChange={e => setEditingStaff({...editingStaff, birthDate: fromDisplayDate(e.target.value)})} 
+                    />
                   </div>
                   <div className="space-y-1">
                     <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Children (0-3)</label>
@@ -2249,7 +2431,11 @@ function TeacherView({ staff, jobTitles, departments, classes, sessions, leaveUs
                   </div>
                   <div className="space-y-1">
                     <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Issue Date</label>
-                    <Input type="date" value={editingStaff?.citizenIdDate || ''} onChange={e => setEditingStaff({...editingStaff, citizenIdDate: e.target.value})} />
+                    <Input 
+                      placeholder="dd/mm/yyyy"
+                      value={toDisplayDate(editingStaff?.citizenIdDate || '')} 
+                      onChange={e => setEditingStaff({...editingStaff, citizenIdDate: fromDisplayDate(e.target.value)})} 
+                    />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
@@ -2403,15 +2589,6 @@ function CourseDashboard({ classes, programs, staff, campuses }: { classes: Clas
     }
   };
 
-  const safeFormat = (dateStr: string, formatStr: string) => {
-    try {
-      const date = parseISO(dateStr);
-      if (isNaN(date.getTime())) return 'N/A';
-      return format(date, formatStr);
-    } catch (e) {
-      return 'N/A';
-    }
-  };
 
   return (
     <div className="flex flex-col h-full bg-white rounded-[32px] border border-black/5 shadow-sm overflow-hidden">
@@ -2462,7 +2639,9 @@ function CourseDashboard({ classes, programs, staff, campuses }: { classes: Clas
             {/* Classes by Program */}
             <div className="space-y-12 relative z-10">
               {sortedPrograms.map((program, pIdx) => {
-              const programClasses = activeClasses.filter(c => c.programId === program.id);
+              const programClasses = activeClasses
+                .filter(c => c.programId === program.id)
+                .sort((a, b) => a.name.localeCompare(b.name));
               if (programClasses.length === 0) return null;
 
               return (
@@ -2485,7 +2664,7 @@ function CourseDashboard({ classes, programs, staff, campuses }: { classes: Clas
                             className="absolute text-[9px] font-mono text-black/30 whitespace-nowrap"
                             style={{ left: `${left}%`, transform: 'translateX(-110%)' }}
                           >
-                            {safeFormat(c.startDate, 'dd/MM')}
+                            {safeFormat(c.startDate)}
                           </div>
 
                           {/* Bar */}
@@ -2508,7 +2687,7 @@ function CourseDashboard({ classes, programs, staff, campuses }: { classes: Clas
                             className="absolute text-[9px] font-mono text-black/30 whitespace-nowrap"
                             style={{ left: `${right}%`, transform: 'translateX(10%)' }}
                           >
-                            {safeFormat(c.endDate, 'dd/MM')}
+                            {safeFormat(c.endDate)}
                           </div>
                         </div>
                       );
@@ -2527,6 +2706,7 @@ function CourseDashboard({ classes, programs, staff, campuses }: { classes: Clas
                 <div className="space-y-6">
                   {activeClasses
                     .filter(c => !c.programId || !programs.find(p => p.id === c.programId))
+                    .sort((a, b) => a.name.localeCompare(b.name))
                     .map(c => {
                       const left = getPosition(c.startDate);
                       const right = getPosition(c.endDate);
@@ -2540,7 +2720,7 @@ function CourseDashboard({ classes, programs, staff, campuses }: { classes: Clas
                             className="absolute text-[9px] font-mono text-black/30 whitespace-nowrap"
                             style={{ left: `${left}%`, transform: 'translateX(-110%)' }}
                           >
-                            {safeFormat(c.startDate, 'dd/MM')}
+                            {safeFormat(c.startDate)}
                           </div>
                           <div 
                             onClick={() => setSelectedClass(c)}
@@ -2559,7 +2739,7 @@ function CourseDashboard({ classes, programs, staff, campuses }: { classes: Clas
                             className="absolute text-[9px] font-mono text-black/30 whitespace-nowrap"
                             style={{ left: `${right}%`, transform: 'translateX(10%)' }}
                           >
-                            {safeFormat(c.endDate, 'dd/MM')}
+                            {safeFormat(c.endDate)}
                           </div>
                         </div>
                       );
@@ -2614,11 +2794,11 @@ function CourseDashboard({ classes, programs, staff, campuses }: { classes: Clas
               <div className="grid grid-cols-2 gap-8">
                 <div>
                   <label className="text-[10px] uppercase font-bold text-black/30 tracking-widest block mb-1">Start Date</label>
-                  <p className="font-medium">{safeFormat(selectedClass.startDate, 'MMMM dd, yyyy')}</p>
+                  <p className="font-medium">{safeFormat(selectedClass.startDate)}</p>
                 </div>
                 <div>
                   <label className="text-[10px] uppercase font-bold text-black/30 tracking-widest block mb-1">End Date</label>
-                  <p className="font-medium">{safeFormat(selectedClass.endDate, 'MMMM dd, yyyy')}</p>
+                  <p className="font-medium">{safeFormat(selectedClass.endDate)}</p>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-8">
@@ -2704,35 +2884,29 @@ function CourseView({ classes, programs, staff, campuses, jobTitles }: { classes
 
     const reader = new FileReader();
     reader.onload = async (evt) => {
-      const bstr = evt.target?.result;
-      const wb = XLSX.read(bstr, { type: 'binary' });
+      const data = evt.target?.result;
+      const wb = XLSX.read(data, { type: 'array' });
       const wsname = wb.SheetNames[0];
       const ws = wb.Sheets[wsname];
-      const data = XLSX.utils.sheet_to_json(ws) as any[];
+      const jsonData = XLSX.utils.sheet_to_json(ws) as any[];
 
       const batch = writeBatch(db);
       
-      for (const row of data) {
-        const parseDate = (d: string) => {
-          if (!d) return '';
-          const [m, day, y] = d.split('/');
-          return `${y}-${m.padStart(2, '0')}-${day.padStart(2, '0')}`;
-        };
-
+      for (const row of jsonData) {
         const classData: any = {
-          name: row['Class Name'] || '',
-          programId: programs.find(p => p.name === row['Program'])?.id || '',
-          status: row['Status'] || 'Active',
-          teacherId: row['Teacher ID'] || '',
-          taId: row['TA ID'] || '',
-          startDate: parseDate(row['Start Date']),
-          endDate: parseDate(row['End Date']),
-          tuitionFull: Number(row['Tuition Full']) || 0,
-          tuitionMonthly: Number(row['Tuition Monthly']) || 0,
-          schedule: row['Schedule'] ? JSON.parse(row['Schedule']) : []
+          name: getValue(row, ['Class Name', 'Tên lớp']) || '',
+          programId: programs.find(p => p.name === getValue(row, ['Program', 'Chương trình']))?.id || '',
+          status: getValue(row, ['Status', 'Trạng thái']) || 'Active',
+          teacherId: getValue(row, ['Teacher ID', 'Mã GV']) || '',
+          taId: getValue(row, ['TA ID', 'Mã TA']) || '',
+          startDate: normalizeImportDate(getValue(row, ['Start Date', 'Ngày bắt đầu'])),
+          endDate: normalizeImportDate(getValue(row, ['End Date', 'Ngày kết thúc'])),
+          tuitionFull: Number(getValue(row, ['Tuition Full', 'Học phí trọn gói'])) || 0,
+          tuitionMonthly: Number(getValue(row, ['Tuition Monthly', 'Học phí tháng'])) || 0,
+          schedule: getValue(row, ['Schedule', 'Lịch học']) ? JSON.parse(getValue(row, ['Schedule', 'Lịch học'])) : []
         };
 
-        const systemId = row['ID (System)'];
+        const systemId = getValue(row, ['ID (System)', 'ID Hệ thống']);
         if (systemId) {
           batch.update(doc(db, 'classes', systemId), classData);
         } else {
@@ -2747,7 +2921,7 @@ function CourseView({ classes, programs, staff, campuses, jobTitles }: { classes
       alert("Import complete!");
       e.target.value = '';
     };
-    reader.readAsBinaryString(file);
+    reader.readAsArrayBuffer(file);
   };
 
   const saveClass = async (e: React.FormEvent) => {
@@ -2905,7 +3079,7 @@ function CourseView({ classes, programs, staff, campuses, jobTitles }: { classes
                           <div>
                             <p className="font-bold text-sm">{c.name}</p>
                             <p className="text-[10px] text-black/40">
-                              {staff.find(s => s.staffId === c.teacherId)?.name || 'No Teacher'} • {c.status}
+                              {staff.find(s => s.staffId === c.teacherId)?.name || 'No Teacher'} • {c.status} • {safeFormat(c.startDate)} - {safeFormat(c.endDate)}
                             </p>
                           </div>
                         </div>
@@ -2985,12 +3159,20 @@ function CourseView({ classes, programs, staff, campuses, jobTitles }: { classes
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1">
-                      <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Start Date</label>
-                      <Input type="date" value={editingClass?.startDate || ''} onChange={e => setEditingClass({...editingClass, startDate: e.target.value})} />
+                      <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Start Date (dd/mm/yyyy)</label>
+                      <Input 
+                        placeholder="dd/mm/yyyy"
+                        value={toDisplayDate(editingClass?.startDate || '')} 
+                        onChange={e => setEditingClass({...editingClass, startDate: fromDisplayDate(e.target.value)})} 
+                      />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[10px] uppercase font-bold text-black/40 ml-1">End Date (Estimated)</label>
-                      <Input type="date" value={editingClass?.endDate || ''} onChange={e => setEditingClass({...editingClass, endDate: e.target.value})} />
+                      <label className="text-[10px] uppercase font-bold text-black/40 ml-1">End Date (dd/mm/yyyy)</label>
+                      <Input 
+                        placeholder="dd/mm/yyyy"
+                        value={toDisplayDate(editingClass?.endDate || '')} 
+                        onChange={e => setEditingClass({...editingClass, endDate: fromDisplayDate(e.target.value)})} 
+                      />
                     </div>
                   </div>
 

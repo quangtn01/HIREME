@@ -10,6 +10,7 @@ import {
 import { db } from './firebase';
 import * as XLSX from 'xlsx';
 import { Student, Class } from './types';
+import { normalizeImportDate, getValue } from './App';
 import { 
   Plus, 
   Trash2, 
@@ -91,33 +92,37 @@ export function StudentView({ students, classes }: { students: Student[], classe
 
     const reader = new FileReader();
     reader.onload = async (evt) => {
-      const bstr = evt.target?.result;
-      const wb = XLSX.read(bstr, { type: 'binary' });
+      const data = evt.target?.result;
+      const wb = XLSX.read(data, { type: 'array' });
       const wsname = wb.SheetNames[0];
       const ws = wb.Sheets[wsname];
-      const data = XLSX.utils.sheet_to_json(ws) as any[];
+      const jsonData = XLSX.utils.sheet_to_json(ws) as any[];
 
       const batch = writeBatch(db);
       
-      for (const row of data) {
+      for (const row of jsonData) {
+        const birthYearVal = getValue(row, ['Birth Year', 'Năm sinh', 'Ngày sinh']);
+        const normalizedBirthDate = normalizeImportDate(birthYearVal);
+        const birthYear = normalizedBirthDate ? parseInt(normalizedBirthDate.substring(0, 4)) : 0;
+
         const studentData: any = {
-          studentId: row['Student ID'] || '',
-          name: row['Full Name'] || '',
-          nickname: row['Nickname'] || '',
-          status: row['Status'] || 'Pending',
-          gender: row['Gender'] || 'Male',
-          birthYear: Number(row['Birth Year']) || 0,
-          phone: row['Phone'] || '',
-          classIds: row['Classes'] ? row['Classes'].split(',').map((n: string) => classes.find(c => c.name === n.trim())?.id).filter((id: any) => id) : [],
-          email: row['Email'] || '',
-          facebook: row['Số CCCD'] || '',
-          school: row['Địa chỉ'] || '',
-          parentName: row['Parent Name'] || '',
-          parentPhone: row['Parent Phone'] || '',
-          note: row['Note'] || ''
+          studentId: getValue(row, ['Student ID', 'Mã học viên']) || '',
+          name: getValue(row, ['Full Name', 'Họ và tên']) || '',
+          nickname: getValue(row, ['Nickname', 'Tên gọi khác']) || '',
+          status: getValue(row, ['Status', 'Trạng thái']) || 'Pending',
+          gender: getValue(row, ['Gender', 'Giới tính']) || 'Male',
+          birthYear: birthYear || Number(birthYearVal) || 0,
+          phone: getValue(row, ['Phone', 'Số điện thoại']) || '',
+          classIds: getValue(row, ['Classes', 'Lớp học']) ? String(getValue(row, ['Classes', 'Lớp học'])).split(',').map((n: string) => classes.find(c => c.name === n.trim())?.id).filter((id: any) => id) : [],
+          email: getValue(row, ['Email']) || '',
+          facebook: getValue(row, ['Số CCCD', 'Facebook']) || '',
+          school: getValue(row, ['Địa chỉ', 'Trường học']) || '',
+          parentName: getValue(row, ['Parent Name', 'Tên phụ huynh']) || '',
+          parentPhone: getValue(row, ['Parent Phone', 'SĐT phụ huynh']) || '',
+          note: getValue(row, ['Note', 'Ghi chú']) || ''
         };
 
-        const systemId = row['ID (System)'];
+        const systemId = getValue(row, ['ID (System)', 'ID Hệ thống']);
         if (systemId) {
           batch.update(doc(db, 'students', systemId), studentData);
         } else {
@@ -132,7 +137,7 @@ export function StudentView({ students, classes }: { students: Student[], classe
       alert("Import complete!");
       e.target.value = '';
     };
-    reader.readAsBinaryString(file);
+    reader.readAsArrayBuffer(file);
   };
 
   const saveStudent = async (e: React.FormEvent) => {
