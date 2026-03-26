@@ -546,10 +546,6 @@ export default function App() {
             classes={classes} 
             campuses={campuses} 
             jobTitles={jobTitles}
-            onAddSession={(data) => {
-              setEditingSession(data);
-              setIsModalOpen(true);
-            }}
           />
         )}
         {activeTab === 'course' && (
@@ -607,6 +603,7 @@ function SessionModal({ isOpen, onClose, editingSession, setEditingSession, camp
   classes: Class[],
   jobTitles: JobTitle[]
 }) {
+  const [confirmDone, setConfirmDone] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const activeClasses = classes
     .filter(c => c.status === 'Active')
@@ -628,6 +625,7 @@ function SessionModal({ isOpen, onClose, editingSession, setEditingSession, camp
     const data = {
       ...editingSession,
       weekStart,
+      status: editingSession.status || 'Upcoming'
     } as any;
 
     if (editingSession.id) {
@@ -635,6 +633,20 @@ function SessionModal({ isOpen, onClose, editingSession, setEditingSession, camp
     } else {
       await addDoc(collection(db, 'sessions'), data);
     }
+    onClose();
+  };
+
+  const handleMarkDone = async () => {
+    if (!editingSession?.id || editingSession.status === 'Done') return;
+    if (!confirmDone) {
+      setConfirmDone(true);
+      return;
+    }
+    await updateDoc(doc(db, 'sessions', editingSession.id), {
+      status: 'Done'
+    });
+    setEditingSession({ ...editingSession, status: 'Done' });
+    setConfirmDone(false);
     onClose();
   };
 
@@ -726,20 +738,43 @@ function SessionModal({ isOpen, onClose, editingSession, setEditingSession, camp
               <Button type="submit" className="flex-1 bg-emerald-600 text-white hover:bg-emerald-700">Save Session</Button>
             </div>
             {editingSession?.id && (
-              <button 
-                type="button" 
-                onClick={handleDelete}
-                onMouseLeave={() => setConfirmDelete(false)}
-                className={cn(
-                  "w-full py-2 text-xs rounded-xl transition-all flex items-center justify-center gap-2 border",
-                  confirmDelete 
-                    ? "bg-red-600 text-white border-red-600 font-bold animate-pulse" 
-                    : "text-red-400 hover:text-red-600 hover:bg-red-50 border-transparent"
-                )}
-              >
-                <Trash2 size={14} />
-                {confirmDelete ? 'Click again to confirm deletion' : 'Delete Session'}
-              </button>
+              <div className="flex gap-3">
+                <button 
+                  type="button" 
+                  disabled={editingSession.status === 'Done'}
+                  onClick={handleMarkDone}
+                  onMouseLeave={() => setConfirmDone(false)}
+                  className={cn(
+                    "flex-1 py-2 text-xs rounded-xl transition-all flex items-center justify-center gap-2 border",
+                    editingSession.status === 'Done'
+                      ? "bg-emerald-100 text-emerald-700 border-emerald-200 cursor-not-allowed font-bold"
+                      : confirmDone 
+                        ? "bg-red-600 text-white border-red-600 font-bold animate-pulse" 
+                        : "bg-black/5 text-black/60 hover:bg-black/10 border-transparent"
+                  )}
+                >
+                  {editingSession.status === 'Done' ? (
+                    <><Check size={14} /> Done</>
+                  ) : (
+                    <>{confirmDone ? 'Xác nhận đã diễn ra' : 'Upcoming'}</>
+                  )}
+                </button>
+
+                <button 
+                  type="button" 
+                  onClick={handleDelete}
+                  onMouseLeave={() => setConfirmDelete(false)}
+                  className={cn(
+                    "flex-1 py-2 text-xs rounded-xl transition-all flex items-center justify-center gap-2 border",
+                    confirmDelete 
+                      ? "bg-red-600 text-white border-red-600 font-bold animate-pulse" 
+                      : "text-red-400 hover:text-red-600 hover:bg-red-50 border-transparent"
+                  )}
+                >
+                  <Trash2 size={14} />
+                  {confirmDelete ? 'Xác nhận xóa' : 'Delete Session'}
+                </button>
+              </div>
             )}
           </div>
         </form>
@@ -846,7 +881,8 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
                 ...rest,
                 startTime: newStartTime,
                 endTime: newEndTime,
-                weekStart: weekStartStr
+                weekStart: weekStartStr,
+                status: 'Upcoming'
               });
             });
             
@@ -966,7 +1002,8 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
           notes: getValue(row, ['Notes', 'Ghi chú']) || '',
           startTime,
           endTime,
-          weekStart
+          weekStart,
+          status: 'Upcoming'
         };
 
         const systemId = getValue(row, ['ID (System)', 'ID Hệ thống']);
@@ -1076,12 +1113,28 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
                                   <div 
                                     key={session.id}
                                     onClick={(e) => { e.stopPropagation(); onAddSession(session); }}
-                                    className="p-2 bg-emerald-50 border border-emerald-100 rounded-xl flex flex-col justify-center overflow-hidden"
+                                    className={cn(
+                                      "p-2 border rounded-xl flex flex-col justify-center overflow-hidden transition-all",
+                                      session.status === 'Done'
+                                        ? "bg-gray-100 border-gray-200 opacity-60"
+                                        : "bg-emerald-50 border-emerald-100 hover:bg-emerald-100"
+                                    )}
                                   >
-                                    <p className="font-bold text-emerald-900 leading-tight mb-0.5 text-[10px]">
-                                      {classes.find(c => c.id === session.classId)?.name}
-                                    </p>
-                                    <p className="text-[9px] text-emerald-700/70 font-medium truncate">
+                                    <div className="flex items-center justify-between mb-0.5">
+                                      <p className={cn(
+                                        "font-bold leading-tight text-[10px]",
+                                        session.status === 'Done' ? "text-gray-500" : "text-emerald-900"
+                                      )}>
+                                        {classes.find(c => c.id === session.classId)?.name}
+                                      </p>
+                                      {session.status === 'Done' && (
+                                        <Check size={10} className="text-emerald-600" />
+                                      )}
+                                    </div>
+                                    <p className={cn(
+                                      "text-[9px] font-medium truncate",
+                                      session.status === 'Done' ? "text-gray-400" : "text-emerald-700/70"
+                                    )}>
                                       GV: {staff.find(st => st.staffId === session.teacherId)?.name}
                                     </p>
                                     {session.taId && (
@@ -1259,11 +1312,26 @@ function Dashboard2View({ campuses, sessions, staff, classes, onAddSession }: {
                             <div 
                               key={session.id}
                               onClick={() => onAddSession(session)}
-                              className="p-3 bg-emerald-50 border border-emerald-100 rounded-xl cursor-pointer hover:bg-emerald-50 transition-all hover:shadow-sm"
+                              className={cn(
+                                "p-3 border rounded-xl cursor-pointer transition-all hover:shadow-sm",
+                                session.status === 'Done'
+                                  ? "bg-gray-100 border-gray-200 opacity-60"
+                                  : "bg-emerald-50 border-emerald-100 hover:bg-emerald-100"
+                              )}
                             >
-                              <p className="font-bold text-emerald-900 text-xs mb-1.5 uppercase tracking-tight">
-                                {classes.find(c => c.id === session.classId)?.name}
-                              </p>
+                              <div className="flex items-center justify-between mb-1.5">
+                                <p className={cn(
+                                  "font-bold text-xs uppercase tracking-tight",
+                                  session.status === 'Done' ? "text-gray-500" : "text-emerald-900"
+                                )}>
+                                  {classes.find(c => c.id === session.classId)?.name}
+                                </p>
+                                {session.status === 'Done' && (
+                                  <span className="text-[8px] bg-emerald-200 text-emerald-800 px-1 rounded font-bold uppercase flex items-center gap-0.5">
+                                    <Check size={8} /> Done
+                                  </span>
+                                )}
+                              </div>
                               <div className="space-y-1">
                                 <div className="flex items-center gap-1.5 text-[10px] text-emerald-700/70 font-medium">
                                   <span className="w-3.5 h-3.5 flex items-center justify-center bg-emerald-100 rounded text-[8px]">🏢</span>
@@ -1400,31 +1468,15 @@ function SchedulerView({ campuses, staff, classes, sessions, isModalOpen, setIsM
 
 // --- View: Staff View ---
 
-function StaffView({ staff, sessions, classes, campuses, jobTitles, onAddSession }: { 
+function StaffView({ staff, sessions, classes, campuses, jobTitles }: { 
   staff: Staff[], 
   sessions: Session[], 
   classes: Class[], 
   campuses: Campus[],
-  jobTitles: JobTitle[],
-  onAddSession: (data: Partial<Session>) => void
+  jobTitles: JobTitle[]
 }) {
   const [currentWeek, setCurrentWeek] = useState(startOfWeek(new Date(), { weekStartsOn: 1 }));
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(currentWeek, i));
-
-  const handleDoubleClick = (day: Date, slot: typeof SLOTS[0], staffId: string) => {
-    const dateStr = format(day, 'yyyy-MM-dd');
-    const startTime = new Date(`${dateStr}T${slot.start}:00`).toISOString();
-    
-    // Calculate end time (90 mins later)
-    const end = addMinutes(parseISO(startTime), 90);
-    const endTime = end.toISOString();
-
-    onAddSession({
-      teacherId: staffId,
-      startTime,
-      endTime
-    });
-  };
 
   return (
     <div className="space-y-6">
@@ -1485,12 +1537,28 @@ function StaffView({ staff, sessions, classes, campuses, jobTitles, onAddSession
                               {slotSessions.map(session => (
                                 <div 
                                   key={session.id}
-                                  className="p-2 bg-emerald-50 border border-emerald-100 rounded-xl flex flex-col justify-center overflow-hidden"
+                                  className={cn(
+                                    "p-2 border rounded-xl flex flex-col justify-center overflow-hidden transition-all",
+                                    session.status === 'Done'
+                                      ? "bg-gray-100 border-gray-200 opacity-60"
+                                      : "bg-emerald-50 border-emerald-100"
+                                  )}
                                 >
-                                  <p className="font-bold text-emerald-900 leading-tight mb-0.5 text-[10px]">
-                                    {classes.find(c => c.id === session.classId)?.name}
-                                  </p>
-                                  <p className="text-[9px] text-emerald-700/70 font-medium truncate">
+                                  <div className="flex items-center justify-between mb-0.5">
+                                    <p className={cn(
+                                      "font-bold leading-tight text-[10px]",
+                                      session.status === 'Done' ? "text-gray-500" : "text-emerald-900"
+                                    )}>
+                                      {classes.find(c => c.id === session.classId)?.name}
+                                    </p>
+                                    {session.status === 'Done' && (
+                                      <Check size={10} className="text-emerald-600" />
+                                    )}
+                                  </div>
+                                  <p className={cn(
+                                    "text-[9px] font-medium truncate",
+                                    session.status === 'Done' ? "text-gray-400" : "text-emerald-700/70"
+                                  )}>
                                     {campuses.find(c => c.id === session.campusId)?.name} - {session.room}
                                   </p>
                                   {session.zoomId && <p className="text-[8px] text-emerald-500 font-mono truncate mt-0.5">Z: {session.zoomId}</p>}

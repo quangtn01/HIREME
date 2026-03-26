@@ -76,6 +76,7 @@ export interface Session {
   zoomId?: string;
   notes?: string;
   weekStart: string; // YYYY-MM-DD
+  status?: 'Upcoming' | 'Done';
 }
 
 export interface LeaveUsage {

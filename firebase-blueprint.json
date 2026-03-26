@@ -111,7 +111,8 @@
         "startTime": { "type": "string", "format": "date-time", "description": "ISO start time" },
         "endTime": { "type": "string", "format": "date-time", "description": "ISO end time" },
         "zoomId": { "type": "string", "description": "Zoom meeting ID or room number" },
-        "weekStart": { "type": "string", "description": "Monday of the week (YYYY-MM-DD) for easier filtering" }
+        "weekStart": { "type": "string", "description": "Monday of the week (YYYY-MM-DD) for easier filtering" },
+        "status": { "type": "string", "enum": ["Upcoming", "Done"], "description": "Session status" }
       },
       "required": ["classId", "teacherId", "campusId", "room", "startTime", "endTime", "weekStart"]
     },
