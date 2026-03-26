@@ -53,7 +53,7 @@ import {
   Menu,
   Search
 } from 'lucide-react';
-import { format, startOfWeek, addDays, parseISO, isSameDay, addWeeks, subWeeks, addMinutes, addMonths, subMonths, startOfMonth, endOfMonth, differenceInDays, isAfter, isBefore, isWithinInterval } from 'date-fns';
+import { format, startOfWeek, addDays, parseISO, isSameDay, addWeeks, subWeeks, addMinutes, addMonths, subMonths, startOfMonth, endOfMonth, differenceInDays, isAfter, isBefore, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 import { formatInTimeZone, toZonedTime, fromZonedTime } from 'date-fns-tz';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -779,40 +779,93 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
   classes: Class[],
   onAddSession: (data: Partial<Session>) => void
 }) {
-  const [selectedCampusId, setSelectedCampusId] = useState<string>(campuses[0]?.id || '');
+  const [selectedCampusId, setSelectedCampusId] = useState<string>('');
   const [currentWeek, setCurrentWeek] = useState(startOfWeek(new Date(), { weekStartsOn: 1 }));
+  const [copyStatus, setCopyStatus] = useState<{
+    show: boolean;
+    message: string;
+    onConfirm?: () => void;
+    isLoading?: boolean;
+    isSuccess?: boolean;
+  }>({ show: false, message: '' });
+
+  useEffect(() => {
+    if (!selectedCampusId && campuses.length > 0) {
+      setSelectedCampusId(campuses[0].id);
+    }
+  }, [campuses, selectedCampusId]);
 
   const campus = campuses.find(c => c.id === selectedCampusId);
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(currentWeek, i));
 
   const copyPreviousWeek = async () => {
-    const prevWeekStart = format(subWeeks(currentWeek, 1), 'yyyy-MM-dd');
+    const prevWeekStart = subWeeks(currentWeek, 1);
+    const prevWeekEnd = addDays(prevWeekStart, 6);
     const weekStartStr = format(currentWeek, 'yyyy-MM-dd');
-    const prevSessions = sessions.filter(s => s.weekStart === prevWeekStart && s.campusId === selectedCampusId);
+
+    const startTs = startOfDay(prevWeekStart).getTime();
+    const endTs = endOfDay(prevWeekEnd).getTime();
+
+    // Filter ALL sessions from the previous week across all campuses
+    const prevSessions = sessions.filter(s => {
+      try {
+        const sessionDate = parseISO(s.startTime);
+        const ts = sessionDate.getTime();
+        return ts >= startTs && ts <= endTs;
+      } catch (e) {
+        return false;
+      }
+    });
     
     if (!prevSessions.length) {
-      alert("No sessions found in the previous week for this campus.");
+      setCopyStatus({
+        show: true,
+        message: `Không tìm thấy buổi dạy nào trong tuần trước (${format(prevWeekStart, 'dd/MM/yyyy')} - ${format(prevWeekEnd, 'dd/MM/yyyy')}).`,
+      });
       return;
     }
 
-    if (!confirm(`Copy ${prevSessions.length} sessions from last week?`)) return;
-
-    const batch = writeBatch(db);
-    prevSessions.forEach(s => {
-      const { id, ...rest } = s;
-      const newStartTime = addWeeks(parseISO(s.startTime), 1).toISOString();
-      const newEndTime = addWeeks(parseISO(s.endTime), 1).toISOString();
-      
-      const newSessionRef = doc(collection(db, 'sessions'));
-      batch.set(newSessionRef, {
-        ...rest,
-        startTime: newStartTime,
-        endTime: newEndTime,
-        weekStart: weekStartStr
-      });
+    setCopyStatus({
+      show: true,
+      message: `Tìm thấy ${prevSessions.length} buổi dạy trong tuần trước. Bạn có muốn copy toàn bộ sang tuần này (${format(currentWeek, 'dd/MM/yyyy')}) không?`,
+      onConfirm: async () => {
+        setCopyStatus(prev => ({ ...prev, isLoading: true, message: 'Đang copy lịch dạy...' }));
+        try {
+          const CHUNK_SIZE = 450;
+          for (let i = 0; i < prevSessions.length; i += CHUNK_SIZE) {
+            const chunk = prevSessions.slice(i, i + CHUNK_SIZE);
+            const batch = writeBatch(db);
+            
+            chunk.forEach(s => {
+              const { id, ...rest } = s;
+              const newStartTime = addWeeks(parseISO(s.startTime), 1).toISOString();
+              const newEndTime = addWeeks(parseISO(s.endTime), 1).toISOString();
+              
+              const newSessionRef = doc(collection(db, 'sessions'));
+              batch.set(newSessionRef, {
+                ...rest,
+                startTime: newStartTime,
+                endTime: newEndTime,
+                weekStart: weekStartStr
+              });
+            });
+            
+            await batch.commit();
+          }
+          setCopyStatus({
+            show: true,
+            message: `Đã copy thành công ${prevSessions.length} buổi dạy sang tuần này!`,
+            isSuccess: true
+          });
+        } catch (error) {
+          console.error("Error copying sessions:", error);
+          setCopyStatus({
+            show: true,
+            message: "Có lỗi xảy ra khi copy lịch dạy. Vui lòng thử lại.",
+          });
+        }
+      }
     });
-
-    await batch.commit();
   };
 
   const handleDoubleClick = (day: Date, slot: typeof SLOTS[0], room: string) => {
@@ -926,7 +979,11 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
       }
 
       await batch.commit();
-      alert("Import complete!");
+      setCopyStatus({
+        show: true,
+        message: "Đã import dữ liệu thành công!",
+        isSuccess: true
+      });
       e.target.value = '';
     };
     reader.readAsArrayBuffer(file);
@@ -1051,6 +1108,65 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
           </div>
         </div>
       )}
+      {copyStatus.show && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-[32px] p-8 max-w-md w-full shadow-2xl border border-black/5 animate-in fade-in zoom-in duration-300">
+            <div className="flex flex-col items-center text-center gap-6">
+              <div className={cn(
+                "w-16 h-16 rounded-2xl flex items-center justify-center",
+                copyStatus.isLoading ? "bg-emerald-50 text-emerald-600 animate-pulse" : 
+                copyStatus.isSuccess ? "bg-emerald-100 text-emerald-600" : "bg-black/5 text-black/40"
+              )}>
+                {copyStatus.isLoading ? (
+                  <div className="w-8 h-8 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin" />
+                ) : copyStatus.isSuccess ? (
+                  <Check size={32} />
+                ) : (
+                  <Copy size={32} />
+                )}
+              </div>
+              
+              <div className="space-y-2">
+                <h3 className="text-xl font-serif italic">
+                  {copyStatus.isLoading ? 'Đang xử lý...' : 
+                   copyStatus.isSuccess ? 'Thành công!' : 'Xác nhận copy'}
+                </h3>
+                <p className="text-sm text-black/60 leading-relaxed">
+                  {copyStatus.message}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3 w-full">
+                {!copyStatus.isLoading && !copyStatus.isSuccess && (
+                  <>
+                    <Button 
+                      onClick={() => setCopyStatus({ show: false, message: '' })}
+                      className="flex-1 bg-black/5 text-black/60 hover:bg-black/10"
+                    >
+                      Hủy
+                    </Button>
+                    <Button 
+                      onClick={copyStatus.onConfirm}
+                      className="flex-1 bg-emerald-600 text-white hover:bg-emerald-700"
+                    >
+                      Xác nhận
+                    </Button>
+                  </>
+                )}
+                {(copyStatus.isLoading || copyStatus.isSuccess) && (
+                  <Button 
+                    onClick={() => setCopyStatus({ show: false, message: '' })}
+                    disabled={copyStatus.isLoading}
+                    className="w-full bg-black/90 text-white hover:bg-black"
+                  >
+                    {copyStatus.isLoading ? 'Vui lòng đợi...' : 'Đóng'}
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1064,8 +1180,14 @@ function Dashboard2View({ campuses, sessions, staff, classes, onAddSession }: {
   classes: Class[],
   onAddSession: (data: Partial<Session>) => void
 }) {
-  const [selectedCampusId, setSelectedCampusId] = useState<string>(campuses[0]?.id || '');
+  const [selectedCampusId, setSelectedCampusId] = useState<string>('');
   const [currentWeek, setCurrentWeek] = useState(startOfWeek(new Date(), { weekStartsOn: 1 }));
+
+  useEffect(() => {
+    if (!selectedCampusId && campuses.length > 0) {
+      setSelectedCampusId(campuses[0].id);
+    }
+  }, [campuses, selectedCampusId]);
 
   const campus = campuses.find(c => c.id === selectedCampusId);
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(currentWeek, i));
