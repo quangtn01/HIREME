@@ -51,7 +51,8 @@ import {
   X,
   Edit2,
   Menu,
-  Search
+  Search,
+  Clock
 } from 'lucide-react';
 import { format, startOfWeek, addDays, parseISO, isSameDay, addWeeks, subWeeks, addMinutes, addMonths, subMonths, startOfMonth, endOfMonth, differenceInDays, isAfter, isBefore, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 import { formatInTimeZone, toZonedTime, fromZonedTime } from 'date-fns-tz';
@@ -319,9 +320,12 @@ const SessionTimePicker = ({ startTime, endTime, onChange }: { startTime: string
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'dashboard2' | 'staff' | 'course' | 'student' | 'teacher' | 'management'>('dashboard');
+  const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isTimetableOpen, setIsTimetableOpen] = useState(true);
+  const [isCourseOpen, setIsCourseOpen] = useState(false);
+  const [isStudentOpen, setIsStudentOpen] = useState(false);
+  const [isTeacherOpen, setIsTeacherOpen] = useState(false);
   const [campuses, setCampuses] = useState<Campus[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [classes, setClasses] = useState<Class[]>([]);
@@ -334,6 +338,13 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingSession, setEditingSession] = useState<Partial<Session> | null>(null);
+
+  useEffect(() => {
+    if (activeTab.startsWith('course')) setIsCourseOpen(true);
+    if (activeTab.startsWith('student')) setIsStudentOpen(true);
+    if (activeTab.startsWith('teacher')) setIsTeacherOpen(true);
+    if (['staff', 'dashboard2', 'dashboard'].includes(activeTab)) setIsTimetableOpen(true);
+  }, [activeTab]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
@@ -448,7 +459,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f5f5f0] flex relative">
+    <div className="h-screen bg-[#f5f5f0] flex relative overflow-hidden">
       {/* Sidebar Toggle Button (Floating) */}
       <button 
         onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -463,7 +474,7 @@ export default function App() {
 
       {/* Sidebar */}
       <aside className={cn(
-        "bg-white border-r border-black/5 flex flex-col transition-all duration-300 overflow-hidden",
+        "bg-white border-r border-black/5 flex flex-col transition-all duration-300 overflow-y-auto",
         isSidebarOpen ? "w-64" : "w-0 border-none"
       )}>
         <div className="p-6 border-bottom border-black/5 whitespace-nowrap">
@@ -492,9 +503,69 @@ export default function App() {
             )}
           </div>
 
-          <NavItem icon={<BookOpen size={18} />} label="Course" active={activeTab === 'course'} onClick={() => setActiveTab('course')} />
-          <NavItem icon={<GraduationCap size={18} />} label="Student" active={activeTab === 'student'} onClick={() => setActiveTab('student')} />
-          <NavItem icon={<Users size={18} />} label="Teacher" active={activeTab === 'teacher'} onClick={() => setActiveTab('teacher')} />
+          {/* Course Category */}
+          <div>
+            <button 
+              onClick={() => setIsCourseOpen(!isCourseOpen)}
+              className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-bold text-black/40 hover:bg-black/5 transition-all uppercase tracking-wider"
+            >
+              <div className="flex items-center gap-3">
+                <BookOpen size={18} />
+                Course
+              </div>
+              {isCourseOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </button>
+            {isCourseOpen && (
+              <div className="mt-1 ml-4 space-y-1 border-l-2 border-black/5 pl-2">
+                <NavItem icon={<LayoutDashboard size={16} />} label="Dashboard" active={activeTab === 'course-dashboard'} onClick={() => setActiveTab('course-dashboard')} />
+                <NavItem icon={<BookOpen size={16} />} label="Course Details" active={activeTab === 'course-details'} onClick={() => setActiveTab('course-details')} />
+              </div>
+            )}
+          </div>
+
+          {/* Student Category */}
+          <div>
+            <button 
+              onClick={() => setIsStudentOpen(!isStudentOpen)}
+              className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-bold text-black/40 hover:bg-black/5 transition-all uppercase tracking-wider"
+            >
+              <div className="flex items-center gap-3">
+                <GraduationCap size={18} />
+                Student
+              </div>
+              {isStudentOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </button>
+            {isStudentOpen && (
+              <div className="mt-1 ml-4 space-y-1 border-l-2 border-black/5 pl-2">
+                <NavItem icon={<Users size={16} />} label="Details" active={activeTab === 'student-details'} onClick={() => setActiveTab('student-details')} />
+                <NavItem icon={<Grid size={16} />} label="Summary" active={activeTab === 'student-summary'} onClick={() => setActiveTab('student-summary')} />
+                <NavItem icon={<BookOpen size={16} />} label="By Class" active={activeTab === 'student-byClass'} onClick={() => setActiveTab('student-byClass')} />
+              </div>
+            )}
+          </div>
+
+          {/* Teacher Category */}
+          <div>
+            <button 
+              onClick={() => setIsTeacherOpen(!isTeacherOpen)}
+              className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-bold text-black/40 hover:bg-black/5 transition-all uppercase tracking-wider"
+            >
+              <div className="flex items-center gap-3">
+                <Users size={18} />
+                Teacher
+              </div>
+              {isTeacherOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </button>
+            {isTeacherOpen && (
+              <div className="mt-1 ml-4 space-y-1 border-l-2 border-black/5 pl-2">
+                <NavItem icon={<Grid size={16} />} label="Summary" active={activeTab === 'teacher-summary'} onClick={() => setActiveTab('teacher-summary')} />
+                <NavItem icon={<Users size={16} />} label="Details" active={activeTab === 'teacher-details'} onClick={() => setActiveTab('teacher-details')} />
+                <NavItem icon={<Calendar size={16} />} label="Leave Tracker" active={activeTab === 'teacher-leave'} onClick={() => setActiveTab('teacher-leave')} />
+                <NavItem icon={<Clock size={16} />} label="Timesheet" active={activeTab === 'teacher-timesheet'} onClick={() => setActiveTab('teacher-timesheet')} />
+              </div>
+            )}
+          </div>
+
           <NavItem icon={<Settings size={18} />} label="Management" active={activeTab === 'management'} onClick={() => setActiveTab('management')} />
         </nav>
 
@@ -548,17 +619,22 @@ export default function App() {
             jobTitles={jobTitles}
           />
         )}
-        {activeTab === 'course' && (
-          <CourseView classes={classes} programs={programs} staff={staff} campuses={campuses} jobTitles={jobTitles} />
+        {activeTab.startsWith('course') && (
+          <CourseView 
+            subTab={activeTab === 'course' ? 'dashboard' : activeTab.split('-')[1] as any}
+            classes={classes} programs={programs} staff={staff} campuses={campuses} jobTitles={jobTitles} 
+          />
         )}
-        {activeTab === 'student' && (
+        {activeTab.startsWith('student') && (
           <StudentView 
+            subTab={activeTab === 'student' ? 'details' : activeTab.split('-')[1] as any}
             students={students}
             classes={classes}
           />
         )}
-        {activeTab === 'teacher' && (
+        {activeTab.startsWith('teacher') && (
           <TeacherView 
+            subTab={activeTab === 'teacher' ? 'summary' : activeTab.split('-')[1] as any}
             staff={staff} 
             jobTitles={jobTitles} 
             departments={departments} 
@@ -1031,7 +1107,7 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-serif italic">Campus Dashboard</h1>
+        <h1 className="text-3xl font-serif italic pl-12">Campus Dashboard</h1>
         <div className="flex items-center gap-4">
           <Button onClick={copyPreviousWeek} className="bg-white border border-black/10 hover:bg-black/5 flex items-center gap-2 text-xs py-2 px-3">
             <Copy size={16} />
@@ -1258,7 +1334,7 @@ function Dashboard2View({ campuses, sessions, staff, classes, onAddSession }: {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-serif italic">Office View</h1>
+        <h1 className="text-3xl font-serif italic pl-12">Office View</h1>
         <div className="flex items-center gap-4">
           <div className="flex items-center bg-white rounded-xl border border-black/5 p-1">
             <button onClick={() => setCurrentWeek(subWeeks(currentWeek, 1))} className="p-2 hover:bg-black/5 rounded-lg"><ChevronLeft size={16} /></button>
@@ -1409,7 +1485,7 @@ function SchedulerView({ campuses, staff, classes, sessions, isModalOpen, setIsM
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-serif italic">Admin Scheduler</h1>
+        <h1 className="text-3xl font-serif italic pl-12">Admin Scheduler</h1>
         <div className="flex items-center gap-4">
           <Button onClick={copyPreviousWeek} className="bg-white border border-black/10 hover:bg-black/5 flex items-center gap-2 text-sm">
             <Copy size={16} />
@@ -1481,7 +1557,7 @@ function StaffView({ staff, sessions, classes, campuses, jobTitles }: {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-serif italic">Staff Schedule</h1>
+        <h1 className="text-3xl font-serif italic pl-12">Staff Schedule</h1>
         <div className="flex items-center bg-white rounded-xl border border-black/5 p-1">
           <button onClick={() => setCurrentWeek(subWeeks(currentWeek, 1))} className="p-2 hover:bg-black/5 rounded-lg"><ChevronLeft size={16} /></button>
           <span className="px-4 text-sm font-medium">Week of {format(currentWeek, 'dd/MM/yyyy')}</span>
@@ -1668,7 +1744,7 @@ function ManagementView({ campuses, programs, jobTitles, departments }: { campus
 
   return (
     <div className="max-w-4xl space-y-12 pb-20">
-      <h1 className="text-3xl font-serif italic">Management</h1>
+      <h1 className="text-3xl font-serif italic pl-12">Management</h1>
 
       {/* Campuses */}
       <section className="space-y-4">
@@ -1808,7 +1884,7 @@ function ManagementView({ campuses, programs, jobTitles, departments }: { campus
 
 // --- View: Teacher (Staff Directory) ---
 
-function LeaveManagementView({ staff, leaveUsage }: { staff: Staff[], leaveUsage: LeaveUsage[] }) {
+function LeaveTrackerView({ staff, leaveUsage }: { staff: Staff[], leaveUsage: LeaveUsage[] }) {
   const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
   const [newLeaveDays, setNewLeaveDays] = useState<number>(1);
   const [newLeaveNote, setNewLeaveNote] = useState<string>('');
@@ -2060,7 +2136,148 @@ function LeaveManagementView({ staff, leaveUsage }: { staff: Staff[], leaveUsage
 }
 
 
-function TeacherView({ staff, jobTitles, departments, classes, sessions, leaveUsage }: { 
+function TimesheetView({ staff, sessions }: { staff: Staff[], sessions: Session[] }) {
+  const [selectedMonth, setSelectedMonth] = useState(new Date());
+
+  const year = selectedMonth.getFullYear();
+  const month = selectedMonth.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const monthDays = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+
+  const workingStaff = staff
+    .filter(s => s.status === 'Working')
+    .sort((a, b) => (a.staffId || '').localeCompare(b.staffId || ''));
+
+  const doneSessions = sessions.filter(s => s.status === 'Done');
+
+  const getSessionsCount = (staffId: string, day: number) => {
+    return doneSessions.filter(s => {
+      if (s.teacherId !== staffId && s.taId !== staffId) return false;
+      const sessionDate = parseISO(s.startTime);
+      return (
+        sessionDate.getFullYear() === year &&
+        sessionDate.getMonth() === month &&
+        sessionDate.getDate() === day
+      );
+    }).length;
+  };
+
+  const getStaffTotal = (staffId: string) => {
+    return doneSessions.filter(s => {
+      if (s.teacherId !== staffId && s.taId !== staffId) return false;
+      const sessionDate = parseISO(s.startTime);
+      return (
+        sessionDate.getFullYear() === year &&
+        sessionDate.getMonth() === month
+      );
+    }).length;
+  };
+
+  const exportTimesheetToExcel = () => {
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    
+    const dataToExport = workingStaff.map(s => {
+      const row: any = {
+        'Mã NV': s.staffId,
+        'Họ và tên': s.name
+      };
+      
+      for (let day = 1; day <= daysInMonth; day++) {
+        const count = getSessionsCount(s.staffId, day);
+        row[day.toString()] = count > 0 ? count : 0;
+      }
+      
+      row['Tổng cộng'] = getStaffTotal(s.staffId);
+      return row;
+    });
+
+    const ws = XLSX.utils.json_to_sheet(dataToExport);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Timesheet");
+    XLSX.writeFile(wb, `Timesheet_${month + 1}_${year}.xlsx`);
+  };
+
+  return (
+    <div className="flex-1 bg-white rounded-[32px] border border-black/5 shadow-sm overflow-hidden flex flex-col">
+      <div className="p-6 border-b border-black/5 flex justify-between items-center bg-gray-50/50">
+        <h2 className="text-xl font-bold flex items-center gap-2">
+          <Calendar size={20} className="text-blue-600" />
+          Bảng chấm công (Timesheet)
+        </h2>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 bg-black/5 p-1 rounded-xl">
+            <button 
+              onClick={() => setSelectedMonth(subMonths(selectedMonth, 1))}
+              className="p-1.5 hover:bg-white rounded-lg transition-all"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <span className="text-sm font-bold px-2 min-w-[120px] text-center">
+              Tháng {month + 1} / {year}
+            </span>
+            <button 
+              onClick={() => setSelectedMonth(addMonths(selectedMonth, 1))}
+              className="p-1.5 hover:bg-white rounded-lg transition-all"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
+          <Button 
+            onClick={exportTimesheetToExcel}
+            className="bg-emerald-600 text-white hover:bg-emerald-700 flex items-center gap-2 text-xs py-2"
+          >
+            <Download size={16} />
+            Export Excel
+          </Button>
+        </div>
+      </div>
+      <div className="flex-1 overflow-auto">
+        <table className="w-full text-left border-collapse">
+          <thead className="sticky top-0 z-20 bg-gray-100 shadow-sm">
+            <tr>
+              <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5 sticky left-0 z-30 bg-gray-100 min-w-[200px]">Nhân viên</th>
+              {monthDays.map(day => (
+                <th key={day} className="p-2 text-[10px] font-bold text-center text-black/40 border-b border-black/5 min-w-[40px]">
+                  {day}
+                </th>
+              ))}
+              <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5 text-center sticky right-0 z-30 bg-gray-100 min-w-[80px]">Tổng</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-black/5">
+            {workingStaff.map(s => (
+              <tr key={s.id} className="hover:bg-black/[0.02] transition-colors group">
+                <td className="p-4 text-sm font-bold sticky left-0 z-10 bg-white group-hover:bg-gray-50 border-r border-black/5">
+                  <div className="flex flex-col">
+                    <span>{s.name}</span>
+                    <span className="text-[10px] text-black/40 font-mono">{s.staffId}</span>
+                  </div>
+                </td>
+                {monthDays.map(day => {
+                  const count = getSessionsCount(s.staffId, day);
+                  return (
+                    <td key={day} className={cn(
+                      "p-2 text-xs text-center border-r border-black/5",
+                      count > 0 ? "font-bold text-blue-600 bg-blue-50/30" : "text-black/10"
+                    )}>
+                      {count > 0 ? count : '-'}
+                    </td>
+                  );
+                })}
+                <td className="p-4 text-sm font-bold text-center sticky right-0 z-10 bg-white group-hover:bg-gray-50 border-l border-black/5 text-blue-700">
+                  {getStaffTotal(s.staffId)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function TeacherView({ subTab, staff, jobTitles, departments, classes, sessions, leaveUsage }: { 
+  subTab: 'summary' | 'details' | 'leave' | 'timesheet',
   staff: Staff[], 
   jobTitles: JobTitle[], 
   departments: Department[], 
@@ -2068,7 +2285,6 @@ function TeacherView({ staff, jobTitles, departments, classes, sessions, leaveUs
   sessions: Session[],
   leaveUsage: LeaveUsage[]
 }) {
-  const [subTab, setSubTab] = useState<'summary' | 'details' | 'leave'>('summary');
   const [editingStaff, setEditingStaff] = useState<Partial<Staff> | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -2314,37 +2530,6 @@ function TeacherView({ staff, jobTitles, departments, classes, sessions, leaveUs
 
   return (
     <div className="flex flex-col h-[calc(100vh-100px)] gap-4">
-      {/* Sub-navigation */}
-      <div className="flex gap-4 border-b border-black/5 pb-2">
-        <button 
-          onClick={() => setSubTab('summary')}
-          className={cn(
-            "px-4 py-2 text-sm font-bold transition-all rounded-xl",
-            subTab === 'summary' ? "bg-blue-600 text-white shadow-md" : "text-black/40 hover:bg-black/5"
-          )}
-        >
-          Summary Table
-        </button>
-        <button 
-          onClick={() => setSubTab('details')}
-          className={cn(
-            "px-4 py-2 text-sm font-bold transition-all rounded-xl",
-            subTab === 'details' ? "bg-blue-600 text-white shadow-md" : "text-black/40 hover:bg-black/5"
-          )}
-        >
-          Staff Details
-        </button>
-        <button 
-          onClick={() => setSubTab('leave')}
-          className={cn(
-            "px-4 py-2 text-sm font-bold transition-all rounded-xl",
-            subTab === 'leave' ? "bg-blue-600 text-white shadow-md" : "text-black/40 hover:bg-black/5"
-          )}
-        >
-          Leave Management
-        </button>
-      </div>
-
       {subTab === 'summary' ? (
         <div className="flex-1 bg-white rounded-[32px] border border-black/5 shadow-sm overflow-hidden flex flex-col">
           <div className="p-6 border-b border-black/5 flex justify-between items-center bg-gray-50/50">
@@ -2414,6 +2599,8 @@ function TeacherView({ staff, jobTitles, departments, classes, sessions, leaveUs
             </table>
           </div>
         </div>
+      ) : subTab === 'timesheet' ? (
+        <TimesheetView staff={staff} sessions={sessions} />
       ) : subTab === 'details' ? (
         <div className="flex gap-6 flex-1 overflow-hidden">
           {/* Left: Staff List */}
@@ -2712,7 +2899,7 @@ function TeacherView({ staff, jobTitles, departments, classes, sessions, leaveUs
       </div>
     </div>
   ) : (
-    <LeaveManagementView staff={staff} leaveUsage={leaveUsage} />
+    <LeaveTrackerView staff={staff} leaveUsage={leaveUsage} />
   )}
 </div>
   );
@@ -3031,8 +3218,10 @@ function CourseDashboard({ classes, programs, staff, campuses }: { classes: Clas
   );
 }
 
-function CourseView({ classes, programs, staff, campuses, jobTitles }: { classes: Class[], programs: Program[], staff: Staff[], campuses: Campus[], jobTitles: JobTitle[] }) {
-  const [subTab, setSubTab] = useState<'dashboard' | 'details'>('dashboard');
+function CourseView({ subTab, classes, programs, staff, campuses, jobTitles }: { 
+  subTab: 'dashboard' | 'details',
+  classes: Class[], programs: Program[], staff: Staff[], campuses: Campus[], jobTitles: JobTitle[] 
+}) {
   const [editingClass, setEditingClass] = useState<Partial<Class> | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
@@ -3179,31 +3368,7 @@ function CourseView({ classes, programs, staff, campuses, jobTitles }: { classes
   });
 
   return (
-    <div className="flex flex-col h-[calc(100vh-100px)] space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-serif italic">Courses</h1>
-        <div className="flex bg-white rounded-2xl border border-black/5 p-1.5 shadow-sm">
-          <button 
-            onClick={() => setSubTab('dashboard')}
-            className={cn(
-              "px-6 py-2 rounded-xl text-xs font-bold transition-all",
-              subTab === 'dashboard' ? "bg-purple-600 text-white shadow-md" : "text-black/40 hover:bg-black/5"
-            )}
-          >
-            Dashboard
-          </button>
-          <button 
-            onClick={() => setSubTab('details')}
-            className={cn(
-              "px-6 py-2 rounded-xl text-xs font-bold transition-all",
-              subTab === 'details' ? "bg-purple-600 text-white shadow-md" : "text-black/40 hover:bg-black/5"
-            )}
-          >
-            Course Details
-          </button>
-        </div>
-      </div>
-
+    <div className="flex flex-col h-full">
       {subTab === 'dashboard' ? (
         <CourseDashboard classes={classes} programs={programs} staff={staff} campuses={campuses} />
       ) : (

@@ -42,8 +42,11 @@ const Select = ({ className, ...props }: React.SelectHTMLAttributes<HTMLSelectEl
   <select className={cn("w-full px-4 py-2 bg-white border border-black/10 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20", className)} {...props} />
 );
 
-export function StudentView({ students, classes }: { students: Student[], classes: Class[] }) {
-  const [subTab, setSubTab] = useState<'details' | 'summary' | 'byClass'>('details');
+export function StudentView({ subTab, students, classes }: { 
+  subTab: 'details' | 'summary' | 'byClass',
+  students: Student[], 
+  classes: Class[] 
+}) {
   const [editingStudent, setEditingStudent] = useState<Partial<Student> | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -224,37 +227,6 @@ export function StudentView({ students, classes }: { students: Student[], classe
 
   return (
     <div className="flex flex-col h-[calc(100vh-100px)] gap-4">
-      {/* Sub-navigation */}
-      <div className="flex gap-4 border-b border-black/5 pb-2">
-        <button 
-          onClick={() => setSubTab('details')}
-          className={cn(
-            "px-4 py-2 text-sm font-bold transition-all rounded-xl",
-            subTab === 'details' ? "bg-emerald-600 text-white shadow-md" : "text-black/40 hover:bg-black/5"
-          )}
-        >
-          Student Details
-        </button>
-        <button 
-          onClick={() => setSubTab('summary')}
-          className={cn(
-            "px-4 py-2 text-sm font-bold transition-all rounded-xl",
-            subTab === 'summary' ? "bg-emerald-600 text-white shadow-md" : "text-black/40 hover:bg-black/5"
-          )}
-        >
-          Summary
-        </button>
-        <button 
-          onClick={() => setSubTab('byClass')}
-          className={cn(
-            "px-4 py-2 text-sm font-bold transition-all rounded-xl",
-            subTab === 'byClass' ? "bg-emerald-600 text-white shadow-md" : "text-black/40 hover:bg-black/5"
-          )}
-        >
-          By Class
-        </button>
-      </div>
-
       {subTab === 'details' && (
         <div className="flex gap-6 flex-1 overflow-hidden">
           {/* Left: Student List */}
