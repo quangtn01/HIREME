@@ -149,6 +149,20 @@
         "note": { "type": "string", "description": "Additional notes" }
       },
       "required": ["studentId", "name", "status"]
+    },
+    "TuitionRecord": {
+      "title": "Tuition Record",
+      "description": "A record of tuition payment for a student in a class for a specific month.",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "description": "ID of the student" },
+        "classId": { "type": "string", "description": "ID of the class" },
+        "month": { "type": "string", "description": "Month of tuition (YYYY-MM)" },
+        "paymentDate": { "type": "string", "description": "Date of payment (YYYY-MM-DD)" },
+        "amount": { "type": ["number", "string"], "description": "Amount paid or 'DONE'" },
+        "note": { "type": "string", "description": "Additional notes" }
+      },
+      "required": ["studentId", "classId", "month", "paymentDate", "amount"]
     }
   },
   "firestore": {
@@ -160,6 +174,7 @@
     "departments": { "schema": "Department", "description": "Collection of departments" },
     "sessions": { "schema": "Session", "description": "Collection of scheduled sessions" },
     "leaveUsage": { "schema": "LeaveUsage", "description": "Collection of leave usage records" },
-    "students": { "schema": "Student", "description": "Collection of students" }
+    "students": { "schema": "Student", "description": "Collection of students" },
+    "tuitionRecords": { "schema": "TuitionRecord", "description": "Collection of tuition payment records" }
   }
 }

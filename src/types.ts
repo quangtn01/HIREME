@@ -104,3 +104,13 @@ export interface Student {
   parentPhone?: string;
   note?: string;
 }
+
+export interface TuitionRecord {
+  id: string;
+  studentId: string;
+  classId: string;
+  month: string; // YYYY-MM
+  paymentDate: string; // YYYY-MM-DD
+  amount: number | 'DONE';
+  note?: string;
+}

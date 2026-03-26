@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   collection, 
   onSnapshot, 
@@ -24,7 +24,7 @@ import {
 } from 'firebase/auth';
 import { db, auth } from './firebase';
 import * as XLSX from 'xlsx';
-import { Campus, Staff, Class, Session, Program, ScheduleItem, JobTitle, Department, LeaveUsage, Student } from './types';
+import { Campus, Staff, Class, Session, Program, ScheduleItem, JobTitle, Department, LeaveUsage, Student, TuitionRecord } from './types';
 import { StudentView } from './StudentView';
 import { 
   LayoutDashboard, 
@@ -335,6 +335,7 @@ export default function App() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [leaveUsage, setLeaveUsage] = useState<LeaveUsage[]>([]);
+  const [tuitionRecords, setTuitionRecords] = useState<TuitionRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingSession, setEditingSession] = useState<Partial<Session> | null>(null);
@@ -413,6 +414,9 @@ export default function App() {
     const unsubLeave = onSnapshot(collection(db, 'leaveUsage'), (snap) => {
       setLeaveUsage(snap.docs.map(d => ({ id: d.id, ...d.data() } as LeaveUsage)));
     });
+    const unsubTuition = onSnapshot(collection(db, 'tuitionRecords'), (snap) => {
+      setTuitionRecords(snap.docs.map(d => ({ id: d.id, ...d.data() } as TuitionRecord)));
+    });
 
     return () => {
       unsubCampuses();
@@ -424,6 +428,7 @@ export default function App() {
       unsubDepartments();
       unsubSessions();
       unsubLeave();
+      unsubTuition();
     };
   }, [user]);
 
@@ -519,6 +524,7 @@ export default function App() {
               <div className="mt-1 ml-4 space-y-1 border-l-2 border-black/5 pl-2">
                 <NavItem icon={<LayoutDashboard size={16} />} label="Dashboard" active={activeTab === 'course-dashboard'} onClick={() => setActiveTab('course-dashboard')} />
                 <NavItem icon={<BookOpen size={16} />} label="Course Details" active={activeTab === 'course-details'} onClick={() => setActiveTab('course-details')} />
+                <NavItem icon={<Briefcase size={16} />} label="Tuition Class" active={activeTab === 'course-tuition'} onClick={() => setActiveTab('course-tuition')} />
               </div>
             )}
           </div>
@@ -623,6 +629,7 @@ export default function App() {
           <CourseView 
             subTab={activeTab === 'course' ? 'dashboard' : activeTab.split('-')[1] as any}
             classes={classes} programs={programs} staff={staff} campuses={campuses} jobTitles={jobTitles} 
+            students={students} tuitionRecords={tuitionRecords}
           />
         )}
         {activeTab.startsWith('student') && (
@@ -3218,9 +3225,10 @@ function CourseDashboard({ classes, programs, staff, campuses }: { classes: Clas
   );
 }
 
-function CourseView({ subTab, classes, programs, staff, campuses, jobTitles }: { 
-  subTab: 'dashboard' | 'details',
-  classes: Class[], programs: Program[], staff: Staff[], campuses: Campus[], jobTitles: JobTitle[] 
+function CourseView({ subTab, classes, programs, staff, campuses, jobTitles, students, tuitionRecords }: { 
+  subTab: 'dashboard' | 'details' | 'tuition',
+  classes: Class[], programs: Program[], staff: Staff[], campuses: Campus[], jobTitles: JobTitle[],
+  students: Student[], tuitionRecords: TuitionRecord[]
 }) {
   const [editingClass, setEditingClass] = useState<Partial<Class> | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -3371,6 +3379,8 @@ function CourseView({ subTab, classes, programs, staff, campuses, jobTitles }: {
     <div className="flex flex-col h-full">
       {subTab === 'dashboard' ? (
         <CourseDashboard classes={classes} programs={programs} staff={staff} campuses={campuses} />
+      ) : subTab === 'tuition' ? (
+        <TuitionView classes={classes} students={students} tuitionRecords={tuitionRecords} />
       ) : (
         <div className="flex gap-6 flex-1 overflow-hidden">
           {/* Left: Class List grouped by Program */}
@@ -3627,6 +3637,218 @@ function CourseView({ subTab, classes, programs, staff, campuses, jobTitles }: {
                 <p className="text-sm font-medium">Select a class to edit or click "Add Class" to create a new one.</p>
               </div>
             )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TuitionView({ classes, students, tuitionRecords }: { classes: Class[], students: Student[], tuitionRecords: TuitionRecord[] }) {
+  const [selectedClassId, setSelectedClassId] = useState<string>('');
+  const [editingRecord, setEditingRecord] = useState<{ student: Student, month: string, record?: TuitionRecord } | null>(null);
+  const [paymentDate, setPaymentDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
+  const [amount, setAmount] = useState<string>('');
+  const [note, setNote] = useState<string>('');
+
+  const activeClasses = classes.filter(c => c.status === 'Active').sort((a, b) => a.name.localeCompare(b.name));
+  const selectedClass = classes.find(c => c.id === selectedClassId);
+
+  const classStudents = students
+    .filter(s => s.classIds.includes(selectedClassId))
+    .sort((a, b) => a.studentId.localeCompare(b.studentId));
+
+  const months = useMemo(() => {
+    if (!selectedClass) return [];
+    const start = parseISO(selectedClass.startDate);
+    const end = parseISO(selectedClass.endDate);
+    const monthList = [];
+    let current = startOfMonth(start);
+    while (isBefore(current, end) || isSameDay(current, startOfMonth(end))) {
+      monthList.push(format(current, 'yyyy-MM'));
+      current = addMonths(current, 1);
+    }
+    return monthList;
+  }, [selectedClass]);
+
+  const handleSave = async () => {
+    if (!editingRecord) return;
+    const { student, month, record } = editingRecord;
+    
+    const cleanAmount = amount.trim().toUpperCase();
+    if (cleanAmount !== 'DONE' && isNaN(Number(cleanAmount))) {
+      return;
+    }
+
+    const data = {
+      studentId: student.id,
+      classId: selectedClassId,
+      month,
+      paymentDate,
+      amount: cleanAmount === 'DONE' ? 'DONE' : Number(cleanAmount),
+      note
+    };
+
+    if (record) {
+      await updateDoc(doc(db, 'tuitionRecords', record.id), data);
+    } else {
+      await addDoc(collection(db, 'tuitionRecords'), data);
+    }
+    setEditingRecord(null);
+  };
+
+  const handleDelete = async () => {
+    if (!editingRecord?.record) return;
+    await deleteDoc(doc(db, 'tuitionRecords', editingRecord.record.id));
+    setEditingRecord(null);
+  };
+
+  return (
+    <div className="flex flex-col h-full bg-white rounded-[32px] border border-black/5 shadow-sm overflow-hidden">
+      <div className="p-6 border-b border-black/5 bg-gray-50/50 flex justify-between items-center">
+        <div className="flex items-center gap-4">
+          <h2 className="text-xl font-bold flex items-center gap-2">
+            <Briefcase size={20} className="text-emerald-600" />
+            Tuition Class
+          </h2>
+          <Select value={selectedClassId} onChange={e => setSelectedClassId(e.target.value)} className="w-64">
+            <option value="">Select Active Class</option>
+            {activeClasses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </Select>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-auto relative">
+        {selectedClassId ? (
+          <table className="w-full text-left border-collapse min-w-max">
+            <thead className="sticky top-0 z-20 bg-gray-100 shadow-sm">
+              <tr>
+                <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5 sticky left-0 z-30 bg-gray-100 w-12">No.</th>
+                <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5 sticky left-12 z-30 bg-gray-100 w-48">Student Name</th>
+                <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Status</th>
+                <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Phone</th>
+                <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Note</th>
+                {months.map(m => (
+                  <th key={m} className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5 text-center min-w-[120px]">
+                    {format(parseISO(m + '-01'), 'MMM yyyy')}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-black/5">
+              {classStudents.map((s, idx) => (
+                <tr key={s.id} className="hover:bg-black/[0.02] transition-colors group">
+                  <td className="p-4 text-sm font-mono text-black/30 sticky left-0 z-10 bg-white group-hover:bg-gray-50 border-r border-black/5">{idx + 1}</td>
+                  <td className="p-4 text-sm font-bold sticky left-12 z-10 bg-white group-hover:bg-gray-50 border-r border-black/5">{s.name}</td>
+                  <td className="p-4 text-xs">
+                    <span className={cn(
+                      "px-2 py-0.5 rounded-full font-bold uppercase tracking-tighter",
+                      s.status === 'Study' ? "bg-emerald-100 text-emerald-600" : "bg-gray-100 text-gray-400"
+                    )}>
+                      {s.status}
+                    </span>
+                  </td>
+                  <td className="p-4 text-sm">{s.phone || '-'}</td>
+                  <td className="p-4 text-sm truncate max-w-[150px]">{s.note || '-'}</td>
+                  {months.map(m => {
+                    const record = tuitionRecords.find(r => r.studentId === s.id && r.classId === selectedClassId && r.month === m);
+                    return (
+                      <td 
+                        key={m} 
+                        onDoubleClick={() => {
+                          setEditingRecord({ student: s, month: m, record });
+                          setPaymentDate(record?.paymentDate || format(new Date(), 'yyyy-MM-dd'));
+                          setAmount(record?.amount?.toString() || '');
+                          setNote(record?.note || '');
+                        }}
+                        className="p-4 text-sm text-center cursor-pointer hover:bg-emerald-50/50 transition-colors border-l border-black/5"
+                      >
+                        {record ? (
+                          <div className="flex flex-col items-center">
+                            <span className={cn(
+                              "font-bold",
+                              record.amount === 'DONE' ? "text-blue-600" : "text-emerald-600"
+                            )}>
+                              {record.amount === 'DONE' ? 'DONE' : new Intl.NumberFormat('vi-VN').format(record.amount as number)}
+                            </span>
+                            <span className="text-[9px] text-black/30">{safeFormat(record.paymentDate)}</span>
+                          </div>
+                        ) : (
+                          <span className="text-black/10 italic text-xs">-</span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <div className="h-full flex flex-col items-center justify-center text-black/20 p-12 text-center">
+            <Briefcase size={48} className="mb-4" />
+            <h3 className="text-xl font-bold text-black/40">Select a class to manage tuition</h3>
+          </div>
+        )}
+      </div>
+
+      {editingRecord && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/20 backdrop-blur-sm">
+          <div className="bg-white rounded-[40px] shadow-2xl border border-black/5 w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-8 border-b border-black/5 bg-gray-50/50">
+              <h2 className="text-2xl font-bold">Tuition Payment</h2>
+              <p className="text-sm text-black/40 font-medium">{format(parseISO(editingRecord.month + '-01'), 'MMMM yyyy')}</p>
+            </div>
+            <div className="p-8 space-y-6">
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] uppercase font-bold text-black/30 tracking-widest block mb-1">Student ID</label>
+                    <p className="font-mono text-sm">{editingRecord.student.studentId}</p>
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase font-bold text-black/30 tracking-widest block mb-1">Class</label>
+                    <p className="font-medium text-sm">{selectedClass?.name}</p>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-black/30 tracking-widest block mb-1">Student Name</label>
+                  <p className="font-bold">{editingRecord.student.name}</p>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Payment Date</label>
+                  <Input 
+                    type="date"
+                    value={paymentDate} 
+                    onChange={e => setPaymentDate(e.target.value)} 
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Amount (Number or 'DONE')</label>
+                  <Input 
+                    value={amount} 
+                    onChange={e => setAmount(e.target.value)} 
+                    placeholder="e.g. 500000 or DONE"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Note</label>
+                  <Input 
+                    value={note} 
+                    onChange={e => setNote(e.target.value)} 
+                    placeholder="Optional note"
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="p-8 border-t border-black/5 flex flex-col gap-3">
+              <div className="flex gap-3">
+                <Button onClick={() => setEditingRecord(null)} className="flex-1 bg-black/5 hover:bg-black/10">Cancel</Button>
+                <Button onClick={handleSave} className="flex-1 bg-emerald-600 text-white hover:bg-emerald-700">Save</Button>
+              </div>
+              {editingRecord.record && (
+                <Button onClick={handleDelete} className="w-full bg-red-50 text-red-600 hover:bg-red-100 border-red-100">Delete Record</Button>
+              )}
+            </div>
           </div>
         </div>
       )}

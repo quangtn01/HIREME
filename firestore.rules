@@ -64,5 +64,11 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow write: if isAdmin();
     }
+
+    // Tuition Records
+    match /tuitionRecords/{recordId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
   }
 }
