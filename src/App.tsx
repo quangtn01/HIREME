@@ -24,7 +24,7 @@ import {
 } from 'firebase/auth';
 import { db, auth } from './firebase';
 import * as XLSX from 'xlsx';
-import { Campus, Staff, Class, Session, Program, ScheduleItem, JobTitle, Department, LeaveUsage, Student, TuitionRecord, AttendanceRecord } from './types';
+import { Campus, Staff, Class, Session, Program, ScheduleItem, JobTitle, Department, LeaveUsage, Student, TuitionRecord, AttendanceRecord, Permission } from './types';
 import { StudentView } from './StudentView';
 import { 
   LayoutDashboard, 
@@ -45,6 +45,7 @@ import {
   GraduationCap,
   Briefcase,
   Building2,
+  Shield,
   Download,
   Upload,
   Check,
@@ -52,7 +53,8 @@ import {
   Edit2,
   Menu,
   Search,
-  Clock
+  Clock,
+  AlertCircle
 } from 'lucide-react';
 import { format, startOfWeek, addDays, parseISO, isSameDay, addWeeks, subWeeks, addMinutes, addMonths, subMonths, startOfMonth, endOfMonth, differenceInDays, isAfter, isBefore, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 import { formatInTimeZone, toZonedTime, fromZonedTime } from 'date-fns-tz';
@@ -317,6 +319,58 @@ const SessionTimePicker = ({ startTime, endTime, onChange }: { startTime: string
 
 // --- Main App ---
 
+const NAV_STRUCTURE = [
+  {
+    category: 'Timetable',
+    icon: <Calendar size={18} />,
+    isOpenKey: 'isTimetableOpen',
+    pages: [
+      { id: 'timetable-teacher', label: 'Teacher View', icon: <Users size={16} /> },
+      { id: 'staff', label: 'Staff View', icon: <Users size={16} /> },
+      { id: 'dashboard2', label: 'Office View', icon: <Grid size={16} /> },
+      { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={16} /> },
+    ]
+  },
+  {
+    category: 'Course',
+    icon: <BookOpen size={18} />,
+    isOpenKey: 'isCourseOpen',
+    pages: [
+      { id: 'course-dashboard', label: 'Dashboard', icon: <LayoutDashboard size={16} /> },
+      { id: 'course-details', label: 'Course Details', icon: <BookOpen size={16} /> },
+      { id: 'course-tuition', label: 'Tuition Class', icon: <Briefcase size={16} /> },
+      { id: 'course-attendance', label: 'Attendance', icon: <Check size={16} /> },
+    ]
+  },
+  {
+    category: 'Student',
+    icon: <GraduationCap size={18} />,
+    isOpenKey: 'isStudentOpen',
+    pages: [
+      { id: 'student-details', label: 'Details', icon: <Users size={16} /> },
+      { id: 'student-summary', label: 'Summary', icon: <Grid size={16} /> },
+      { id: 'student-byClass', label: 'By Class', icon: <BookOpen size={16} /> },
+    ]
+  },
+  {
+    category: 'Teacher',
+    icon: <Users size={18} />,
+    isOpenKey: 'isTeacherOpen',
+    pages: [
+      { id: 'teacher-summary', label: 'Summary', icon: <Grid size={16} /> },
+      { id: 'teacher-details', label: 'Details', icon: <Users size={16} /> },
+      { id: 'teacher-leave', label: 'Leave Tracker', icon: <Calendar size={16} /> },
+      { id: 'teacher-timesheet', label: 'Timesheet', icon: <Clock size={16} /> },
+    ]
+  },
+  {
+    category: 'Management',
+    id: 'management',
+    icon: <Settings size={18} />,
+    pages: [] // No sub-pages
+  }
+];
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -337,6 +391,7 @@ export default function App() {
   const [leaveUsage, setLeaveUsage] = useState<LeaveUsage[]>([]);
   const [tuitionRecords, setTuitionRecords] = useState<TuitionRecord[]>([]);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
+  const [permissions, setPermissions] = useState<Permission[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingSession, setEditingSession] = useState<Partial<Session> | null>(null);
@@ -421,6 +476,9 @@ export default function App() {
     const unsubAttendance = onSnapshot(collection(db, 'attendanceRecords'), (snap) => {
       setAttendanceRecords(snap.docs.map(d => ({ id: d.id, ...d.data() } as AttendanceRecord)));
     });
+    const unsubPermissions = onSnapshot(collection(db, 'permissions'), (snap) => {
+      setPermissions(snap.docs.map(d => ({ id: d.id, ...d.data() } as Permission)));
+    });
 
     return () => {
       unsubCampuses();
@@ -434,6 +492,7 @@ export default function App() {
       unsubLeave();
       unsubTuition();
       unsubAttendance();
+      unsubPermissions();
     };
   }, [user]);
 
@@ -468,6 +527,16 @@ export default function App() {
     );
   }
 
+  const currentUserStaff = staff.find(s => s.email === user.email);
+  const currentUserJobTitleIds = currentUserStaff?.jobTitleIds || [];
+
+  const hasPermission = (pageId: string) => {
+    if (user.email === 'quangtn01@gmail.com') return true;
+    const perm = permissions.find(p => p.pageId === pageId);
+    if (!perm) return false;
+    return perm.jobTitleIds.some(id => currentUserJobTitleIds.includes(id));
+  };
+
   return (
     <div className="h-screen bg-[#f5f5f0] flex relative overflow-hidden">
       {/* Sidebar Toggle Button (Floating) */}
@@ -492,94 +561,64 @@ export default function App() {
         </div>
         
         <nav className="flex-1 p-4 space-y-2">
-          <div>
-            <button 
-              onClick={() => setIsTimetableOpen(!isTimetableOpen)}
-              className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-bold text-black/40 hover:bg-black/5 transition-all uppercase tracking-wider"
-            >
-              <div className="flex items-center gap-3">
-                <Calendar size={18} />
-                Timetable
-              </div>
-              {isTimetableOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            </button>
+          {NAV_STRUCTURE.map(cat => {
+            const visiblePages = cat.pages.filter(p => hasPermission(p.id));
+            const isCategoryVisible = cat.id ? hasPermission(cat.id) : visiblePages.length > 0;
+
+            if (!isCategoryVisible) return null;
+
+            if (cat.id) {
+              // Top-level item like Management
+              return (
+                <NavItem 
+                  key={cat.id}
+                  icon={cat.icon} 
+                  label={cat.category} 
+                  active={activeTab === cat.id} 
+                  onClick={() => setActiveTab(cat.id)} 
+                />
+              );
+            }
+
+            const isOpen = cat.isOpenKey === 'isTimetableOpen' ? isTimetableOpen :
+                           cat.isOpenKey === 'isCourseOpen' ? isCourseOpen :
+                           cat.isOpenKey === 'isStudentOpen' ? isStudentOpen :
+                           cat.isOpenKey === 'isTeacherOpen' ? isTeacherOpen : false;
             
-            {isTimetableOpen && (
-              <div className="mt-1 ml-4 space-y-1 border-l-2 border-black/5 pl-2">
-                <NavItem icon={<Users size={16} />} label="Teacher View" active={activeTab === 'timetable-teacher'} onClick={() => setActiveTab('timetable-teacher')} />
-                <NavItem icon={<Users size={16} />} label="Staff View" active={activeTab === 'staff'} onClick={() => setActiveTab('staff')} />
-                <NavItem icon={<Grid size={16} />} label="Office View" active={activeTab === 'dashboard2'} onClick={() => setActiveTab('dashboard2')} />
-                <NavItem icon={<LayoutDashboard size={16} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
-              </div>
-            )}
-          </div>
+            const setIsOpen = cat.isOpenKey === 'isTimetableOpen' ? setIsTimetableOpen :
+                              cat.isOpenKey === 'isCourseOpen' ? setIsCourseOpen :
+                              cat.isOpenKey === 'isStudentOpen' ? setIsStudentOpen :
+                              cat.isOpenKey === 'isTeacherOpen' ? setIsTeacherOpen : () => {};
 
-          {/* Course Category */}
-          <div>
-            <button 
-              onClick={() => setIsCourseOpen(!isCourseOpen)}
-              className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-bold text-black/40 hover:bg-black/5 transition-all uppercase tracking-wider"
-            >
-              <div className="flex items-center gap-3">
-                <BookOpen size={18} />
-                Course
+            return (
+              <div key={cat.category}>
+                <button 
+                  onClick={() => setIsOpen(!isOpen)}
+                  className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-bold text-black/40 hover:bg-black/5 transition-all uppercase tracking-wider"
+                >
+                  <div className="flex items-center gap-3">
+                    {cat.icon}
+                    {cat.category}
+                  </div>
+                  {isOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                </button>
+                
+                {isOpen && (
+                  <div className="mt-1 ml-4 space-y-1 border-l-2 border-black/5 pl-2">
+                    {visiblePages.map(page => (
+                      <NavItem 
+                        key={page.id}
+                        icon={page.icon} 
+                        label={page.label} 
+                        active={activeTab === page.id} 
+                        onClick={() => setActiveTab(page.id)} 
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
-              {isCourseOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            </button>
-            {isCourseOpen && (
-              <div className="mt-1 ml-4 space-y-1 border-l-2 border-black/5 pl-2">
-                <NavItem icon={<LayoutDashboard size={16} />} label="Dashboard" active={activeTab === 'course-dashboard'} onClick={() => setActiveTab('course-dashboard')} />
-                <NavItem icon={<BookOpen size={16} />} label="Course Details" active={activeTab === 'course-details'} onClick={() => setActiveTab('course-details')} />
-                <NavItem icon={<Briefcase size={16} />} label="Tuition Class" active={activeTab === 'course-tuition'} onClick={() => setActiveTab('course-tuition')} />
-                <NavItem icon={<Check size={16} />} label="Attendance" active={activeTab === 'course-attendance'} onClick={() => setActiveTab('course-attendance')} />
-              </div>
-            )}
-          </div>
-
-          {/* Student Category */}
-          <div>
-            <button 
-              onClick={() => setIsStudentOpen(!isStudentOpen)}
-              className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-bold text-black/40 hover:bg-black/5 transition-all uppercase tracking-wider"
-            >
-              <div className="flex items-center gap-3">
-                <GraduationCap size={18} />
-                Student
-              </div>
-              {isStudentOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            </button>
-            {isStudentOpen && (
-              <div className="mt-1 ml-4 space-y-1 border-l-2 border-black/5 pl-2">
-                <NavItem icon={<Users size={16} />} label="Details" active={activeTab === 'student-details'} onClick={() => setActiveTab('student-details')} />
-                <NavItem icon={<Grid size={16} />} label="Summary" active={activeTab === 'student-summary'} onClick={() => setActiveTab('student-summary')} />
-                <NavItem icon={<BookOpen size={16} />} label="By Class" active={activeTab === 'student-byClass'} onClick={() => setActiveTab('student-byClass')} />
-              </div>
-            )}
-          </div>
-
-          {/* Teacher Category */}
-          <div>
-            <button 
-              onClick={() => setIsTeacherOpen(!isTeacherOpen)}
-              className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-bold text-black/40 hover:bg-black/5 transition-all uppercase tracking-wider"
-            >
-              <div className="flex items-center gap-3">
-                <Users size={18} />
-                Teacher
-              </div>
-              {isTeacherOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            </button>
-            {isTeacherOpen && (
-              <div className="mt-1 ml-4 space-y-1 border-l-2 border-black/5 pl-2">
-                <NavItem icon={<Grid size={16} />} label="Summary" active={activeTab === 'teacher-summary'} onClick={() => setActiveTab('teacher-summary')} />
-                <NavItem icon={<Users size={16} />} label="Details" active={activeTab === 'teacher-details'} onClick={() => setActiveTab('teacher-details')} />
-                <NavItem icon={<Calendar size={16} />} label="Leave Tracker" active={activeTab === 'teacher-leave'} onClick={() => setActiveTab('teacher-leave')} />
-                <NavItem icon={<Clock size={16} />} label="Timesheet" active={activeTab === 'teacher-timesheet'} onClick={() => setActiveTab('teacher-timesheet')} />
-              </div>
-            )}
-          </div>
-
-          <NavItem icon={<Settings size={18} />} label="Management" active={activeTab === 'management'} onClick={() => setActiveTab('management')} />
+            );
+          })}
         </nav>
 
         <div className="p-4 border-t border-black/5">
@@ -599,7 +638,25 @@ export default function App() {
 
       {/* Main Content */}
       <main className="flex-1 overflow-auto p-4 pb-2">
-        {activeTab === 'dashboard' && (
+        {!hasPermission(activeTab) ? (
+          <div className="h-full flex flex-col items-center justify-center text-center space-y-4">
+            <div className="p-6 bg-red-50 rounded-[32px] border border-red-100">
+              <Shield size={48} className="text-red-500 mx-auto mb-4" />
+              <h2 className="text-2xl font-serif italic text-red-900">Access Denied</h2>
+              <p className="text-red-600/60 max-w-md">
+                You do not have permission to access this page. Please contact your administrator if you believe this is an error.
+              </p>
+            </div>
+            <Button 
+              onClick={() => setActiveTab('dashboard')}
+              className="bg-black/5 hover:bg-black/10 text-black/60"
+            >
+              Back to Dashboard
+            </Button>
+          </div>
+        ) : (
+          <>
+            {activeTab === 'dashboard' && (
           <DashboardView 
             campuses={campuses} 
             sessions={sessions} 
@@ -675,7 +732,11 @@ export default function App() {
             programs={programs} 
             jobTitles={jobTitles}
             departments={departments}
+            permissions={permissions}
+            navStructure={NAV_STRUCTURE}
           />
+        )}
+          </>
         )}
       </main>
 
@@ -886,7 +947,7 @@ function SessionModal({ isOpen, onClose, editingSession, setEditingSession, camp
   );
 }
 
-function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void }) {
+function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void, key?: any }) {
   return (
     <button 
       onClick={onClick}
@@ -1959,7 +2020,21 @@ function StaffView({ staff, sessions, classes, campuses, jobTitles }: {
 
 // --- View: Management (Campuses & Programs) ---
 
-function ManagementView({ campuses, programs, jobTitles, departments }: { campuses: Campus[], programs: Program[], jobTitles: JobTitle[], departments: Department[] }) {
+function ManagementView({ 
+  campuses, 
+  programs, 
+  jobTitles, 
+  departments,
+  permissions,
+  navStructure
+}: { 
+  campuses: Campus[], 
+  programs: Program[], 
+  jobTitles: JobTitle[], 
+  departments: Department[],
+  permissions: Permission[],
+  navStructure: any[]
+}) {
   const [newCampus, setNewCampus] = useState<{ id?: string, name: string, rooms: string }>({ name: '', rooms: '' });
   const [newProgram, setNewProgram] = useState<{ id?: string, name: string }>({ name: '' });
   const [newJobTitle, setNewJobTitle] = useState<{ id?: string, name: string }>({ name: '' });
@@ -2037,6 +2112,18 @@ function ManagementView({ campuses, programs, jobTitles, departments }: { campus
       if (!departments.find(d => d.name === name)) {
         await addDoc(collection(db, 'departments'), { name });
       }
+    }
+  };
+
+  const togglePermission = async (pageId: string, jobTitleId: string) => {
+    const existing = permissions.find(p => p.pageId === pageId);
+    if (existing) {
+      const newJobTitleIds = existing.jobTitleIds.includes(jobTitleId)
+        ? existing.jobTitleIds.filter(id => id !== jobTitleId)
+        : [...existing.jobTitleIds, jobTitleId];
+      await updateDoc(doc(db, 'permissions', existing.id), { jobTitleIds: newJobTitleIds });
+    } else {
+      await addDoc(collection(db, 'permissions'), { pageId, jobTitleIds: [jobTitleId] });
     }
   };
 
@@ -2171,6 +2258,104 @@ function ManagementView({ campuses, programs, jobTitles, departments }: { campus
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Permissions */}
+      <section className="space-y-4">
+        <h2 className="text-xl font-bold flex items-center gap-2">
+          <Shield size={20} className="text-purple-600" />
+          Page Permissions
+        </h2>
+        <div className="bg-white rounded-[32px] border border-black/5 shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-black/5 border-b border-black/5">
+                  <th className="p-4 font-bold text-sm">Category / Page</th>
+                  <th className="p-4 font-bold text-sm">Allowed Job Titles</th>
+                </tr>
+              </thead>
+              <tbody>
+                {navStructure.map((cat: any) => (
+                  <React.Fragment key={cat.category}>
+                    {/* Category Header Row (if it has sub-pages) */}
+                    {cat.pages.length > 0 ? (
+                      <tr className="bg-black/[0.02] border-b border-black/5">
+                        <td colSpan={2} className="p-4 font-bold text-xs uppercase tracking-wider text-black/40 flex items-center gap-2">
+                          {cat.icon}
+                          {cat.category}
+                        </td>
+                      </tr>
+                    ) : (
+                      <tr className="border-b border-black/5 hover:bg-black/[0.01] transition-colors">
+                        <td className="p-4 flex items-center gap-3">
+                          <div className="p-2 bg-black/5 rounded-lg text-black/40">
+                            {cat.icon}
+                          </div>
+                          <span className="font-bold">{cat.category}</span>
+                        </td>
+                        <td className="p-4">
+                          <div className="flex flex-wrap gap-3">
+                            {jobTitles.map(jt => {
+                              const isChecked = permissions.find(p => p.pageId === cat.id)?.jobTitleIds.includes(jt.id) || false;
+                              return (
+                                <label key={jt.id} className="flex items-center gap-2 cursor-pointer group">
+                                  <div 
+                                    onClick={() => togglePermission(cat.id, jt.id)}
+                                    className={cn(
+                                      "w-5 h-5 rounded border flex items-center justify-center transition-all",
+                                      isChecked ? "bg-purple-600 border-purple-600 text-white" : "border-black/10 group-hover:border-purple-400"
+                                    )}
+                                  >
+                                    {isChecked && <Check size={12} strokeWidth={3} />}
+                                  </div>
+                                  <span className="text-sm">{jt.name}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+
+                    {/* Sub-pages Rows */}
+                    {cat.pages.map((page: any) => (
+                      <tr key={page.id} className="border-b border-black/5 hover:bg-black/[0.01] transition-colors">
+                        <td className="p-4 pl-12 flex items-center gap-3">
+                          <div className="p-2 bg-black/5 rounded-lg text-black/40">
+                            {page.icon}
+                          </div>
+                          <span className="font-medium">{page.label}</span>
+                        </td>
+                        <td className="p-4">
+                          <div className="flex flex-wrap gap-3">
+                            {jobTitles.map(jt => {
+                              const isChecked = permissions.find(p => p.pageId === page.id)?.jobTitleIds.includes(jt.id) || false;
+                              return (
+                                <label key={jt.id} className="flex items-center gap-2 cursor-pointer group">
+                                  <div 
+                                    onClick={() => togglePermission(page.id, jt.id)}
+                                    className={cn(
+                                      "w-5 h-5 rounded border flex items-center justify-center transition-all",
+                                      isChecked ? "bg-purple-600 border-purple-600 text-white" : "border-black/10 group-hover:border-purple-400"
+                                    )}
+                                  >
+                                    {isChecked && <Check size={12} strokeWidth={3} />}
+                                  </div>
+                                  <span className="text-sm">{jt.name}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       </section>

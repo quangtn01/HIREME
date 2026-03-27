@@ -184,6 +184,16 @@
         }
       },
       "required": ["classId", "date", "students"]
+    },
+    "Permission": {
+      "title": "Permission",
+      "description": "Mapping of page IDs to authorized job titles.",
+      "type": "object",
+      "properties": {
+        "pageId": { "type": "string", "description": "ID of the page or category" },
+        "jobTitleIds": { "type": "array", "items": { "type": "string" }, "description": "List of authorized Job Title IDs" }
+      },
+      "required": ["pageId", "jobTitleIds"]
     }
   },
   "firestore": {
@@ -197,6 +207,7 @@
     "leaveUsage": { "schema": "LeaveUsage", "description": "Collection of leave usage records" },
     "students": { "schema": "Student", "description": "Collection of students" },
     "tuitionRecords": { "schema": "TuitionRecord", "description": "Collection of tuition payment records" },
-    "attendanceRecords": { "schema": "AttendanceRecord", "description": "Collection of attendance records" }
+    "attendanceRecords": { "schema": "AttendanceRecord", "description": "Collection of attendance records" },
+    "permissions": { "schema": "Permission", "description": "Collection of page permissions" }
   }
 }

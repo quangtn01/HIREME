@@ -125,3 +125,9 @@ export interface AttendanceRecord {
     status: 'Present' | 'Absent';
   }[];
 }
+
+export interface Permission {
+  id: string;
+  pageId: string;
+  jobTitleIds: string[];
+}

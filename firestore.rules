@@ -76,5 +76,11 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow write: if isAdmin();
     }
+
+    // Permissions
+    match /permissions/{permissionId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
   }
 }
