@@ -54,9 +54,14 @@ import {
   Menu,
   Search,
   Clock,
-  AlertCircle
+  AlertCircle,
+  BarChart3
 } from 'lucide-react';
-import { format, startOfWeek, addDays, parseISO, isSameDay, addWeeks, subWeeks, addMinutes, addMonths, subMonths, startOfMonth, endOfMonth, differenceInDays, isAfter, isBefore, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
+import { 
+  BarChart as ReBarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  PieChart as RePieChart, Pie, Cell, LineChart as ReLineChart, Line, AreaChart, Area
+} from 'recharts';
+import { format, startOfWeek, addDays, parseISO, isSameDay, addWeeks, subWeeks, addMinutes, addMonths, subMonths, startOfMonth, endOfMonth, differenceInDays, isAfter, isBefore, isWithinInterval, startOfDay, endOfDay, subMonths as subMonthsDateFns } from 'date-fns';
 import { formatInTimeZone, toZonedTime, fromZonedTime } from 'date-fns-tz';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -365,6 +370,16 @@ const NAV_STRUCTURE = [
     ]
   },
   {
+    category: 'Report',
+    icon: <BarChart3 size={18} />,
+    isOpenKey: 'isReportOpen',
+    pages: [
+      { id: 'report-overview', label: 'Overview', icon: <Grid size={16} /> },
+      { id: 'report-students', label: 'Students', icon: <Users size={16} /> },
+      { id: 'report-revenue', label: 'Revenue', icon: <Briefcase size={16} /> },
+    ]
+  },
+  {
     category: 'Management',
     id: 'management',
     icon: <Settings size={18} />,
@@ -381,6 +396,7 @@ export default function App() {
   const [isCourseOpen, setIsCourseOpen] = useState(false);
   const [isStudentOpen, setIsStudentOpen] = useState(false);
   const [isTeacherOpen, setIsTeacherOpen] = useState(false);
+  const [isReportOpen, setIsReportOpen] = useState(false);
   const [campuses, setCampuses] = useState<Campus[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [classes, setClasses] = useState<Class[]>([]);
@@ -401,6 +417,7 @@ export default function App() {
     if (activeTab.startsWith('course')) setIsCourseOpen(true);
     if (activeTab.startsWith('student')) setIsStudentOpen(true);
     if (activeTab.startsWith('teacher')) setIsTeacherOpen(true);
+    if (activeTab.startsWith('report')) setIsReportOpen(true);
     if (['staff', 'dashboard2', 'dashboard'].includes(activeTab)) setIsTimetableOpen(true);
   }, [activeTab]);
 
@@ -584,12 +601,14 @@ export default function App() {
             const isOpen = cat.isOpenKey === 'isTimetableOpen' ? isTimetableOpen :
                            cat.isOpenKey === 'isCourseOpen' ? isCourseOpen :
                            cat.isOpenKey === 'isStudentOpen' ? isStudentOpen :
-                           cat.isOpenKey === 'isTeacherOpen' ? isTeacherOpen : false;
+                           cat.isOpenKey === 'isTeacherOpen' ? isTeacherOpen :
+                           cat.isOpenKey === 'isReportOpen' ? isReportOpen : false;
             
             const setIsOpen = cat.isOpenKey === 'isTimetableOpen' ? setIsTimetableOpen :
                               cat.isOpenKey === 'isCourseOpen' ? setIsCourseOpen :
                               cat.isOpenKey === 'isStudentOpen' ? setIsStudentOpen :
-                              cat.isOpenKey === 'isTeacherOpen' ? setIsTeacherOpen : () => {};
+                              cat.isOpenKey === 'isTeacherOpen' ? setIsTeacherOpen :
+                              cat.isOpenKey === 'isReportOpen' ? setIsReportOpen : () => {};
 
             return (
               <div key={cat.category}>
@@ -725,6 +744,17 @@ export default function App() {
             classes={classes} 
             sessions={sessions} 
             leaveUsage={leaveUsage}
+          />
+        )}
+        {activeTab.startsWith('report') && (
+          <ReportView 
+            subTab={activeTab === 'report' ? 'overview' : activeTab.split('-')[1] as any}
+            students={students}
+            classes={classes}
+            tuitionRecords={tuitionRecords}
+            attendanceRecords={attendanceRecords}
+            staff={staff}
+            departments={departments}
           />
         )}
         {activeTab === 'management' && (
@@ -4820,6 +4850,297 @@ function AttendanceView({ classes, students, attendanceRecords, sessions }: {
             <div className="p-8 border-t border-black/5 flex gap-3">
               <Button onClick={() => setIsMarkingOpen(false)} className="flex-1 bg-black/5 hover:bg-black/10">Hủy</Button>
               <Button onClick={saveAttendance} className="flex-1 bg-blue-600 text-white hover:bg-blue-700">Lưu điểm danh</Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- View: Report ---
+
+function ReportView({ 
+  subTab, 
+  students, 
+  classes, 
+  tuitionRecords, 
+  attendanceRecords,
+  staff,
+  departments
+}: { 
+  subTab: 'overview' | 'students' | 'revenue',
+  students: Student[],
+  classes: Class[],
+  tuitionRecords: TuitionRecord[],
+  attendanceRecords: AttendanceRecord[],
+  staff: Staff[],
+  departments: Department[]
+}) {
+  const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+
+  // Data for Overview: Student Status
+  const studentStatusData = useMemo(() => {
+    const counts = students.reduce((acc, s) => {
+      acc[s.status] = (acc[s.status] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+    return Object.entries(counts).map(([name, value]) => ({ name, value }));
+  }, [students]);
+
+  // Data for Revenue: Monthly
+  const revenueData = useMemo(() => {
+    const last6Months = Array.from({ length: 6 }, (_, i) => {
+      const d = subMonthsDateFns(new Date(), i);
+      return format(d, 'yyyy-MM');
+    }).reverse();
+
+    return last6Months.map(month => {
+      const total = tuitionRecords
+        .filter(r => r.month === month && typeof r.amount === 'number')
+        .reduce((sum, r) => sum + (r.amount as number), 0);
+      return { month, amount: total };
+    });
+  }, [tuitionRecords]);
+
+  // Data for Attendance: By Class
+  const attendanceData = useMemo(() => {
+    return classes
+      .filter(c => c.status === 'Active')
+      .map(c => {
+        const records = attendanceRecords.filter(r => r.classId === c.id);
+        if (records.length === 0) return { name: c.name, rate: 0 };
+        
+        let totalPresent = 0;
+        let totalPossible = 0;
+        
+        records.forEach(r => {
+          totalPresent += r.students.filter(s => s.status === 'Present').length;
+          totalPossible += r.students.length;
+        });
+        
+        return { 
+          name: c.name, 
+          rate: totalPossible > 0 ? Math.round((totalPresent / totalPossible) * 100) : 0 
+        };
+      })
+      .sort((a, b) => b.rate - a.rate)
+      .slice(0, 10); // Top 10 classes
+  }, [classes, attendanceRecords]);
+
+  return (
+    <div className="space-y-8 pb-12">
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-serif italic pl-12 capitalize">Reports: {subTab}</h1>
+      </div>
+
+      {subTab === 'overview' && (
+        <div className="space-y-8">
+          {/* Summary Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div className="bg-white p-6 rounded-[32px] border border-black/5 shadow-sm">
+              <p className="text-[10px] uppercase font-bold text-black/40 mb-1">Total Students</p>
+              <p className="text-3xl font-serif italic">{students.length}</p>
+              <p className="text-xs text-emerald-600 mt-2 font-medium">
+                {students.filter(s => s.status === 'Study').length} Active
+              </p>
+            </div>
+            <div className="bg-white p-6 rounded-[32px] border border-black/5 shadow-sm">
+              <p className="text-[10px] uppercase font-bold text-black/40 mb-1">Active Classes</p>
+              <p className="text-3xl font-serif italic">{classes.filter(c => c.status === 'Active').length}</p>
+              <p className="text-xs text-black/40 mt-2 font-medium">
+                Across {new Set(classes.map(c => c.programId)).size} Programs
+              </p>
+            </div>
+            <div className="bg-white p-6 rounded-[32px] border border-black/5 shadow-sm">
+              <p className="text-[10px] uppercase font-bold text-black/40 mb-1">Revenue (This Month)</p>
+              <p className="text-3xl font-serif italic">
+                {revenueData[revenueData.length - 1]?.amount.toLocaleString()}
+              </p>
+              <p className="text-xs text-black/40 mt-2 font-medium">VND</p>
+            </div>
+            <div className="bg-white p-6 rounded-[32px] border border-black/5 shadow-sm">
+              <p className="text-[10px] uppercase font-bold text-black/40 mb-1">Total Staff</p>
+              <p className="text-3xl font-serif italic">{staff.filter(s => s.status === 'Working').length}</p>
+              <p className="text-xs text-black/40 mt-2 font-medium">Active Members</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            {/* Revenue Chart */}
+            <div className="bg-white p-8 rounded-[40px] border border-black/5 shadow-sm h-[400px] flex flex-col">
+              <h3 className="text-lg font-bold mb-6">Revenue Trend (Last 6 Months)</h3>
+              <div className="flex-1">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={revenueData}>
+                    <defs>
+                      <linearGradient id="colorAmount" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.1}/>
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#00000005" />
+                    <XAxis 
+                      dataKey="month" 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{fontSize: 10, fill: '#00000040'}} 
+                    />
+                    <YAxis 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{fontSize: 10, fill: '#00000040'}}
+                      tickFormatter={(value) => `${(value / 1000000).toFixed(1)}M`}
+                    />
+                    <Tooltip 
+                      contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}}
+                      formatter={(value: number) => [value.toLocaleString() + ' VND', 'Revenue']}
+                    />
+                    <Area type="monotone" dataKey="amount" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorAmount)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Student Status Chart */}
+            <div className="bg-white p-8 rounded-[40px] border border-black/5 shadow-sm h-[400px] flex flex-col">
+              <h3 className="text-lg font-bold mb-6">Student Status Distribution</h3>
+              <div className="flex-1 flex items-center">
+                <ResponsiveContainer width="100%" height="100%">
+                  <RePieChart>
+                    <Pie
+                      data={studentStatusData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={80}
+                      outerRadius={120}
+                      paddingAngle={5}
+                      dataKey="value"
+                    >
+                      {studentStatusData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip 
+                      contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}}
+                    />
+                    <Legend verticalAlign="bottom" height={36}/>
+                  </RePieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+
+          {/* Attendance Rate Chart */}
+          <div className="bg-white p-8 rounded-[40px] border border-black/5 shadow-sm h-[400px] flex flex-col">
+            <h3 className="text-lg font-bold mb-6">Top 10 Classes by Attendance Rate (%)</h3>
+            <div className="flex-1">
+              <ResponsiveContainer width="100%" height="100%">
+                <ReBarChart data={attendanceData} layout="vertical">
+                  <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#00000005" />
+                  <XAxis type="number" domain={[0, 100]} hide />
+                  <YAxis 
+                    dataKey="name" 
+                    type="category" 
+                    axisLine={false} 
+                    tickLine={false} 
+                    tick={{fontSize: 10, fill: '#00000080', fontWeight: 'bold'}}
+                    width={150}
+                  />
+                  <Tooltip 
+                    contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}}
+                    formatter={(value: number) => [value + '%', 'Attendance Rate']}
+                  />
+                  <Bar dataKey="rate" fill="#3b82f6" radius={[0, 10, 10, 0]} barSize={20} />
+                </ReBarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {subTab === 'students' && (
+        <div className="space-y-8">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+             {/* Detailed Student Status */}
+             <div className="bg-white p-8 rounded-[40px] border border-black/5 shadow-sm">
+                <h3 className="text-lg font-bold mb-6">Student Status Summary</h3>
+                <div className="space-y-4">
+                  {studentStatusData.map((item, idx) => (
+                    <div key={item.name} className="flex items-center justify-between p-4 bg-black/[0.02] rounded-2xl">
+                      <div className="flex items-center gap-3">
+                        <div className="w-3 h-3 rounded-full" style={{backgroundColor: COLORS[idx % COLORS.length]}}></div>
+                        <span className="font-bold text-sm uppercase tracking-wider">{item.name}</span>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <span className="text-2xl font-serif italic">{item.value}</span>
+                        <span className="text-xs text-black/40 font-medium">
+                          ({Math.round((item.value / students.length) * 100)}%)
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+             </div>
+
+             {/* Growth / Enrollment (Mocked trend based on ID order or similar if no date) */}
+             <div className="bg-white p-8 rounded-[40px] border border-black/5 shadow-sm flex flex-col">
+                <h3 className="text-lg font-bold mb-6">Enrollment Overview</h3>
+                <div className="flex-1 flex flex-col justify-center items-center text-center space-y-4">
+                  <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center">
+                    <Users size={32} className="text-emerald-600" />
+                  </div>
+                  <div>
+                    <p className="text-4xl font-serif italic">{students.filter(s => s.status === 'Study').length}</p>
+                    <p className="text-sm text-black/40 font-medium uppercase tracking-widest">Active Students Currently Studying</p>
+                  </div>
+                  <div className="w-full h-px bg-black/5 my-4"></div>
+                  <div className="grid grid-cols-2 w-full gap-4">
+                    <div className="p-4 bg-blue-50 rounded-2xl">
+                      <p className="text-2xl font-serif italic text-blue-700">{students.filter(s => s.status === 'Trial').length}</p>
+                      <p className="text-[10px] font-bold text-blue-600/60 uppercase">Trialing</p>
+                    </div>
+                    <div className="p-4 bg-amber-50 rounded-2xl">
+                      <p className="text-2xl font-serif italic text-amber-700">{students.filter(s => s.status === 'Pending').length}</p>
+                      <p className="text-[10px] font-bold text-amber-600/60 uppercase">Pending</p>
+                    </div>
+                  </div>
+                </div>
+             </div>
+          </div>
+        </div>
+      )}
+
+      {subTab === 'revenue' && (
+        <div className="space-y-8">
+          <div className="bg-white p-8 rounded-[40px] border border-black/5 shadow-sm overflow-hidden">
+            <h3 className="text-lg font-bold mb-6">Monthly Revenue Breakdown</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-black/5">
+                    <th className="p-4 text-[10px] uppercase font-bold text-black/40">Month</th>
+                    <th className="p-4 text-[10px] uppercase font-bold text-black/40">Total Amount (VND)</th>
+                    <th className="p-4 text-[10px] uppercase font-bold text-black/40">Transactions</th>
+                    <th className="p-4 text-[10px] uppercase font-bold text-black/40">Avg per Student</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-black/[0.02]">
+                  {revenueData.slice().reverse().map(item => {
+                    const count = tuitionRecords.filter(r => r.month === item.month && typeof r.amount === 'number').length;
+                    return (
+                      <tr key={item.month} className="hover:bg-black/[0.01] transition-colors">
+                        <td className="p-4 font-bold text-sm">{item.month}</td>
+                        <td className="p-4 font-mono text-sm text-emerald-600 font-bold">{item.amount.toLocaleString()}</td>
+                        <td className="p-4 text-sm text-black/60">{count}</td>
+                        <td className="p-4 text-sm text-black/60">
+                          {count > 0 ? Math.round(item.amount / count).toLocaleString() : 0}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
