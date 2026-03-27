@@ -13,74 +13,62 @@ service cloud.firestore {
 
     // Campuses
     match /campuses/{campusId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow read, write: if isAuthenticated();
     }
 
     // Staff
     match /staff/{staffId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow read, write: if isAuthenticated();
     }
 
     // Classes
     match /classes/{classId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow read, write: if isAuthenticated();
     }
 
     // Programs
     match /programs/{programId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow read, write: if isAuthenticated();
     }
 
     // Job Titles
     match /jobTitles/{jobTitleId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow read, write: if isAuthenticated();
     }
 
     // Departments
     match /departments/{departmentId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow read, write: if isAuthenticated();
     }
 
     // Sessions
     match /sessions/{sessionId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow read, write: if isAuthenticated();
     }
 
     // Leave Usage
     match /leaveUsage/{leaveId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow read, write: if isAuthenticated();
     }
 
     // Students
     match /students/{studentId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow read, write: if isAuthenticated();
     }
 
     // Tuition Records
     match /tuitionRecords/{recordId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow read, write: if isAuthenticated();
     }
 
     // Attendance Records
     match /attendanceRecords/{recordId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow read, write: if isAuthenticated();
     }
 
     // Permissions
     match /permissions/{permissionId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow read, write: if isAuthenticated();
     }
   }
 }
