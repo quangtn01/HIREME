@@ -112,7 +112,8 @@
         "endTime": { "type": "string", "format": "date-time", "description": "ISO end time" },
         "zoomId": { "type": "string", "description": "Zoom meeting ID or room number" },
         "weekStart": { "type": "string", "description": "Monday of the week (YYYY-MM-DD) for easier filtering" },
-        "status": { "type": "string", "enum": ["Upcoming", "Done"], "description": "Session status" }
+        "status": { "type": "string", "enum": ["Upcoming", "Done"], "description": "Session status" },
+        "attendanceStatus": { "type": "string", "enum": ["Not Done", "Done"], "description": "Attendance status" }
       },
       "required": ["classId", "teacherId", "campusId", "room", "startTime", "endTime", "weekStart"]
     },
@@ -163,6 +164,26 @@
         "note": { "type": "string", "description": "Additional notes" }
       },
       "required": ["studentId", "classId", "month", "paymentDate", "amount"]
+    },
+    "AttendanceRecord": {
+      "title": "Attendance Record",
+      "description": "A record of student attendance for a class on a specific date.",
+      "type": "object",
+      "properties": {
+        "classId": { "type": "string", "description": "ID of the class" },
+        "date": { "type": "string", "description": "Date of attendance (YYYY-MM-DD)" },
+        "students": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "studentId": { "type": "string" },
+              "status": { "type": "string", "enum": ["Present", "Absent"] }
+            }
+          }
+        }
+      },
+      "required": ["classId", "date", "students"]
     }
   },
   "firestore": {
@@ -175,6 +196,7 @@
     "sessions": { "schema": "Session", "description": "Collection of scheduled sessions" },
     "leaveUsage": { "schema": "LeaveUsage", "description": "Collection of leave usage records" },
     "students": { "schema": "Student", "description": "Collection of students" },
-    "tuitionRecords": { "schema": "TuitionRecord", "description": "Collection of tuition payment records" }
+    "tuitionRecords": { "schema": "TuitionRecord", "description": "Collection of tuition payment records" },
+    "attendanceRecords": { "schema": "AttendanceRecord", "description": "Collection of attendance records" }
   }
 }

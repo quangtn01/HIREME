@@ -70,5 +70,11 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow write: if isAdmin();
     }
+
+    // Attendance Records
+    match /attendanceRecords/{recordId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
   }
 }

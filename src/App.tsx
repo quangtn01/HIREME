@@ -24,7 +24,7 @@ import {
 } from 'firebase/auth';
 import { db, auth } from './firebase';
 import * as XLSX from 'xlsx';
-import { Campus, Staff, Class, Session, Program, ScheduleItem, JobTitle, Department, LeaveUsage, Student, TuitionRecord } from './types';
+import { Campus, Staff, Class, Session, Program, ScheduleItem, JobTitle, Department, LeaveUsage, Student, TuitionRecord, AttendanceRecord } from './types';
 import { StudentView } from './StudentView';
 import { 
   LayoutDashboard, 
@@ -336,6 +336,7 @@ export default function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [leaveUsage, setLeaveUsage] = useState<LeaveUsage[]>([]);
   const [tuitionRecords, setTuitionRecords] = useState<TuitionRecord[]>([]);
+  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingSession, setEditingSession] = useState<Partial<Session> | null>(null);
@@ -417,6 +418,9 @@ export default function App() {
     const unsubTuition = onSnapshot(collection(db, 'tuitionRecords'), (snap) => {
       setTuitionRecords(snap.docs.map(d => ({ id: d.id, ...d.data() } as TuitionRecord)));
     });
+    const unsubAttendance = onSnapshot(collection(db, 'attendanceRecords'), (snap) => {
+      setAttendanceRecords(snap.docs.map(d => ({ id: d.id, ...d.data() } as AttendanceRecord)));
+    });
 
     return () => {
       unsubCampuses();
@@ -429,6 +433,7 @@ export default function App() {
       unsubSessions();
       unsubLeave();
       unsubTuition();
+      unsubAttendance();
     };
   }, [user]);
 
@@ -501,6 +506,7 @@ export default function App() {
             
             {isTimetableOpen && (
               <div className="mt-1 ml-4 space-y-1 border-l-2 border-black/5 pl-2">
+                <NavItem icon={<Users size={16} />} label="Teacher View" active={activeTab === 'timetable-teacher'} onClick={() => setActiveTab('timetable-teacher')} />
                 <NavItem icon={<Users size={16} />} label="Staff View" active={activeTab === 'staff'} onClick={() => setActiveTab('staff')} />
                 <NavItem icon={<Grid size={16} />} label="Office View" active={activeTab === 'dashboard2'} onClick={() => setActiveTab('dashboard2')} />
                 <NavItem icon={<LayoutDashboard size={16} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
@@ -525,6 +531,7 @@ export default function App() {
                 <NavItem icon={<LayoutDashboard size={16} />} label="Dashboard" active={activeTab === 'course-dashboard'} onClick={() => setActiveTab('course-dashboard')} />
                 <NavItem icon={<BookOpen size={16} />} label="Course Details" active={activeTab === 'course-details'} onClick={() => setActiveTab('course-details')} />
                 <NavItem icon={<Briefcase size={16} />} label="Tuition Class" active={activeTab === 'course-tuition'} onClick={() => setActiveTab('course-tuition')} />
+                <NavItem icon={<Check size={16} />} label="Attendance" active={activeTab === 'course-attendance'} onClick={() => setActiveTab('course-attendance')} />
               </div>
             )}
           </div>
@@ -604,6 +611,17 @@ export default function App() {
             }}
           />
         )}
+        {activeTab === 'timetable-teacher' && (
+          <TimetableTeacherView 
+            staff={staff} 
+            sessions={sessions} 
+            classes={classes} 
+            campuses={campuses} 
+            userEmail={user.email}
+            students={students}
+            attendanceRecords={attendanceRecords}
+          />
+        )}
         {activeTab === 'dashboard2' && (
           <Dashboard2View 
             campuses={campuses} 
@@ -629,7 +647,8 @@ export default function App() {
           <CourseView 
             subTab={activeTab === 'course' ? 'dashboard' : activeTab.split('-')[1] as any}
             classes={classes} programs={programs} staff={staff} campuses={campuses} jobTitles={jobTitles} 
-            students={students} tuitionRecords={tuitionRecords}
+            students={students} tuitionRecords={tuitionRecords} attendanceRecords={attendanceRecords}
+            sessions={sessions}
           />
         )}
         {activeTab.startsWith('student') && (
@@ -708,7 +727,8 @@ function SessionModal({ isOpen, onClose, editingSession, setEditingSession, camp
     const data = {
       ...editingSession,
       weekStart,
-      status: editingSession.status || 'Upcoming'
+      status: editingSession.status || 'Upcoming',
+      attendanceStatus: editingSession.attendanceStatus || 'Not Done'
     } as any;
 
     if (editingSession.id) {
@@ -1420,9 +1440,16 @@ function Dashboard2View({ campuses, sessions, staff, classes, onAddSession }: {
                                   <span className="w-3.5 h-3.5 flex items-center justify-center bg-emerald-100 rounded text-[8px]">🏢</span>
                                   <span>Phòng {session.room}</span>
                                 </div>
-                                <div className="flex items-center gap-1.5 text-[10px] text-emerald-600/60">
-                                  <span className="w-3.5 h-3.5 flex items-center justify-center bg-emerald-100 rounded text-[8px]">👤</span>
-                                  <span className="truncate">{staff.find(st => st.staffId === session.teacherId)?.name}</span>
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-1.5 text-[10px] text-emerald-600/60">
+                                    <span className="w-3.5 h-3.5 flex items-center justify-center bg-emerald-100 rounded text-[8px]">👤</span>
+                                    <span className="truncate">{staff.find(st => st.staffId === session.teacherId)?.name}</span>
+                                  </div>
+                                  {session.attendanceStatus === 'Done' && (
+                                    <span className="text-[8px] bg-orange-500 text-white px-1.5 py-0.5 rounded font-bold uppercase flex items-center gap-0.5">
+                                      <Check size={8} /> DONE
+                                    </span>
+                                  )}
                                 </div>
                               </div>
                             </div>
@@ -1545,6 +1572,270 @@ function SchedulerView({ campuses, staff, classes, sessions, isModalOpen, setIsM
             </div>
           ))}
       </div>
+    </div>
+  );
+}
+
+// --- View: Timetable Teacher View ---
+
+function TimetableTeacherView({ staff, sessions, classes, campuses, userEmail, students, attendanceRecords }: {
+  staff: Staff[],
+  sessions: Session[],
+  classes: Class[],
+  campuses: Campus[],
+  userEmail: string | null,
+  students: Student[],
+  attendanceRecords: AttendanceRecord[]
+}) {
+  const [selectedDate, setSelectedDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
+  const [selectedStaffId, setSelectedStaffId] = useState<string>('');
+  const [isMarkingOpen, setIsMarkingOpen] = useState(false);
+  const [markingData, setMarkingData] = useState<Record<string, 'Present' | 'Absent'>>({});
+  const [activeSession, setActiveSession] = useState<Session | null>(null);
+
+  useEffect(() => {
+    if (userEmail && !selectedStaffId) {
+      const currentStaff = staff.find(s => s.email?.toLowerCase() === userEmail.toLowerCase());
+      if (currentStaff) {
+        setSelectedStaffId(currentStaff.staffId);
+      }
+    }
+  }, [userEmail, staff, selectedStaffId]);
+
+  const teacherSessions = useMemo(() => {
+    if (!selectedStaffId) return [];
+    return sessions
+      .filter(s => 
+        (s.teacherId === selectedStaffId || s.taId === selectedStaffId) && 
+        safeFormat(s.startTime, 'yyyy-MM-dd') === selectedDate
+      )
+      .sort((a, b) => a.startTime.localeCompare(b.startTime));
+  }, [sessions, selectedStaffId, selectedDate]);
+
+  const sortedStaff = useMemo(() => {
+    return staff
+      .filter(s => s.status === 'Working')
+      .sort((a, b) => (a.staffId || '').localeCompare(b.staffId || ''));
+  }, [staff]);
+
+  const handleDoubleClick = (session: Session) => {
+    const sessionClass = classes.find(c => c.id === session.classId);
+    if (!sessionClass) return;
+
+    const sessionDate = safeFormat(session.startTime, 'yyyy-MM-dd');
+    const existingRecord = attendanceRecords.find(r => r.classId === session.classId && r.date === sessionDate);
+    const initialData: Record<string, 'Present' | 'Absent'> = {};
+    
+    const classStudents = students
+      .filter(s => s.classIds.includes(session.classId) && s.status !== 'Done')
+      .sort((a, b) => a.studentId.localeCompare(b.studentId));
+
+    classStudents.forEach(s => {
+      const studentStatus = existingRecord?.students.find(rs => rs.studentId === s.id)?.status;
+      initialData[s.id] = studentStatus || 'Present';
+    });
+    
+    setMarkingData(initialData);
+    setActiveSession(session);
+    setIsMarkingOpen(true);
+  };
+
+  const saveAttendance = async () => {
+    if (!activeSession) return;
+    const sessionDate = safeFormat(activeSession.startTime, 'yyyy-MM-dd');
+    const existingRecord = attendanceRecords.find(r => r.classId === activeSession.classId && r.date === sessionDate);
+    
+    const recordData = {
+      classId: activeSession.classId,
+      date: sessionDate,
+      students: Object.entries(markingData).map(([studentId, status]) => ({
+        studentId,
+        status
+      }))
+    };
+
+    if (existingRecord) {
+      await updateDoc(doc(db, 'attendanceRecords', existingRecord.id), recordData);
+    } else {
+      await addDoc(collection(db, 'attendanceRecords'), recordData);
+    }
+
+    // Update session status
+    await updateDoc(doc(db, 'sessions', activeSession.id), { 
+      attendanceStatus: 'Done',
+      status: 'Done' 
+    });
+
+    setIsMarkingOpen(false);
+    setActiveSession(null);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="w-full sm:w-auto">
+          <Select 
+            value={selectedStaffId} 
+            onChange={(e) => setSelectedStaffId(e.target.value)} 
+            className="w-full sm:w-48"
+          >
+            <option value="">Chọn nhân viên</option>
+            {sortedStaff.map(s => (
+              <option key={s.id} value={s.staffId}>
+                {s.staffId} - {s.name}
+              </option>
+            ))}
+          </Select>
+        </div>
+
+        <div className="flex items-center gap-2 bg-white rounded-xl border border-black/5 p-1 shadow-sm w-full sm:w-auto justify-between sm:justify-start">
+          <button 
+            onClick={() => {
+              const d = parseISO(selectedDate);
+              setSelectedDate(format(addDays(d, -1), 'yyyy-MM-dd'));
+            }}
+            className="p-2 hover:bg-black/5 rounded-lg transition-all"
+          >
+            <ChevronLeft size={16} />
+          </button>
+          <div className="relative flex-1 sm:flex-initial">
+            <input 
+              type="date" 
+              value={selectedDate} 
+              onChange={e => setSelectedDate(e.target.value)}
+              className="absolute inset-0 opacity-0 cursor-pointer"
+            />
+            <span className="text-sm font-bold px-2 min-w-[100px] text-center block">
+              {safeFormat(selectedDate, 'dd/MM/yyyy')}
+            </span>
+          </div>
+          <button 
+            className="p-2 hover:bg-black/5 rounded-lg transition-all"
+            onClick={() => {
+              const d = parseISO(selectedDate);
+              setSelectedDate(format(addDays(d, 1), 'yyyy-MM-dd'));
+            }}
+          >
+            <ChevronRight size={16} />
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        {teacherSessions.map(session => (
+          <div 
+            key={session.id}
+            onDoubleClick={() => handleDoubleClick(session)}
+            className={cn(
+              "p-6 rounded-[32px] border border-black/5 shadow-sm hover:shadow-md transition-all group relative overflow-hidden cursor-pointer",
+              session.status === 'Done' ? "bg-gray-50" : "bg-emerald-50/30"
+            )}
+          >
+            <div className="flex items-start justify-between mb-4">
+              <h3 className="text-xl font-bold text-black/80 truncate pr-2">
+                {classes.find(c => c.id === session.classId)?.name || 'Unknown Class'}
+              </h3>
+              {session.status === 'Done' && (
+                <span className="text-[10px] bg-emerald-100 text-emerald-600 px-2 py-1 rounded-lg font-bold uppercase flex items-center gap-1 shrink-0">
+                  <Check size={10} /> DONE
+                </span>
+              )}
+            </div>
+            
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-sm text-black/80 font-bold">
+                <span className="w-5 h-5 flex items-center justify-center bg-white rounded shadow-sm">
+                  <Clock size={12} className="text-emerald-600" />
+                </span>
+                <span>{safeFormat(session.startTime, 'HH:mm')} - {safeFormat(session.endTime, 'HH:mm')}</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-black/40 font-medium">
+                <span className="w-5 h-5 flex items-center justify-center bg-white rounded shadow-sm text-[10px]">🏢</span>
+                <span>Phòng {session.room}</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-black/40 font-medium">
+                <span className="w-5 h-5 flex items-center justify-center bg-white rounded shadow-sm text-[10px]">📍</span>
+                <span>{campuses.find(c => c.id === session.campusId)?.name}</span>
+              </div>
+            </div>
+
+            <div className="mt-6 flex items-center justify-end">
+              {session.attendanceStatus === 'Done' && (
+                <span className="text-[10px] bg-orange-500 text-white px-2 py-1 rounded-lg font-bold uppercase flex items-center gap-1">
+                  <Check size={10} /> DONE
+                </span>
+              )}
+            </div>
+          </div>
+        ))}
+        {teacherSessions.length === 0 && (
+          <div className="col-span-full py-20 text-center bg-black/[0.02] rounded-[40px] border-2 border-dashed border-black/5">
+            <p className="text-black/20 font-serif italic text-lg">Không có ca dạy nào trong ngày này</p>
+          </div>
+        )}
+      </div>
+
+      {isMarkingOpen && activeSession && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/20 backdrop-blur-sm">
+          <div className="bg-white rounded-[40px] shadow-2xl border border-black/5 w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-8 border-b border-black/5 bg-gray-50/50 flex justify-between items-center">
+              <div>
+                <h2 className="text-2xl font-bold">Điểm danh lớp {classes.find(c => c.id === activeSession.classId)?.name}</h2>
+                <p className="text-sm text-black/40 font-medium">Ngày {safeFormat(activeSession.startTime, 'dd/MM/yyyy')}</p>
+              </div>
+              <button onClick={() => setIsMarkingOpen(false)} className="p-2 hover:bg-black/5 rounded-full transition-colors">
+                <X size={24} />
+              </button>
+            </div>
+            <div className="p-8 max-h-[60vh] overflow-auto">
+              <div className="space-y-2">
+                {students
+                  .filter(s => s.classIds.includes(activeSession.classId) && s.status !== 'Done')
+                  .sort((a, b) => a.studentId.localeCompare(b.studentId))
+                  .map((s, idx) => (
+                    <div key={s.id} className="flex items-center justify-between p-4 bg-black/[0.02] rounded-2xl">
+                      <div className="flex items-center gap-4">
+                        <span className="text-xs font-mono text-black/30 w-6">{idx + 1}</span>
+                        <div>
+                          <p className="font-bold text-sm">{s.name}</p>
+                          <p className="text-[10px] text-black/40 font-mono">{s.studentId}</p>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => setMarkingData({ ...markingData, [s.id]: 'Present' })}
+                          className={cn(
+                            "px-4 py-2 rounded-xl text-xs font-bold transition-all border",
+                            markingData[s.id] === 'Present' 
+                              ? "bg-emerald-600 text-white border-emerald-600 shadow-md" 
+                              : "bg-white text-black/40 border-black/10 hover:border-black/30"
+                          )}
+                        >
+                          Có mặt
+                        </button>
+                        <button 
+                          onClick={() => setMarkingData({ ...markingData, [s.id]: 'Absent' })}
+                          className={cn(
+                            "px-4 py-2 rounded-xl text-xs font-bold transition-all border",
+                            markingData[s.id] === 'Absent' 
+                              ? "bg-red-600 text-white border-red-600 shadow-md" 
+                              : "bg-white text-black/40 border-black/10 hover:border-black/30"
+                          )}
+                        >
+                          Vắng mặt
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+            <div className="p-8 border-t border-black/5 flex gap-3">
+              <Button onClick={() => setIsMarkingOpen(false)} className="flex-1 bg-black/5 hover:bg-black/10">Hủy</Button>
+              <Button onClick={saveAttendance} className="flex-1 bg-blue-600 text-white hover:bg-blue-700">Lưu điểm danh</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3225,10 +3516,11 @@ function CourseDashboard({ classes, programs, staff, campuses }: { classes: Clas
   );
 }
 
-function CourseView({ subTab, classes, programs, staff, campuses, jobTitles, students, tuitionRecords }: { 
-  subTab: 'dashboard' | 'details' | 'tuition',
+function CourseView({ subTab, classes, programs, staff, campuses, jobTitles, students, tuitionRecords, attendanceRecords, sessions }: { 
+  subTab: 'dashboard' | 'details' | 'tuition' | 'attendance',
   classes: Class[], programs: Program[], staff: Staff[], campuses: Campus[], jobTitles: JobTitle[],
-  students: Student[], tuitionRecords: TuitionRecord[]
+  students: Student[], tuitionRecords: TuitionRecord[], attendanceRecords: AttendanceRecord[],
+  sessions: Session[]
 }) {
   const [editingClass, setEditingClass] = useState<Partial<Class> | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -3381,6 +3673,8 @@ function CourseView({ subTab, classes, programs, staff, campuses, jobTitles, stu
         <CourseDashboard classes={classes} programs={programs} staff={staff} campuses={campuses} />
       ) : subTab === 'tuition' ? (
         <TuitionView classes={classes} students={students} tuitionRecords={tuitionRecords} />
+      ) : subTab === 'attendance' ? (
+        <AttendanceView classes={classes} students={students} attendanceRecords={attendanceRecords} sessions={sessions} />
       ) : (
         <div className="flex gap-6 flex-1 overflow-hidden">
           {/* Left: Class List grouped by Program */}
@@ -3848,6 +4142,268 @@ function TuitionView({ classes, students, tuitionRecords }: { classes: Class[], 
               {editingRecord.record && (
                 <Button onClick={handleDelete} className="w-full bg-red-50 text-red-600 hover:bg-red-100 border-red-100">Delete Record</Button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AttendanceView({ classes, students, attendanceRecords, sessions }: { 
+  classes: Class[], 
+  students: Student[], 
+  attendanceRecords: AttendanceRecord[],
+  sessions: Session[]
+}) {
+  const [selectedDate, setSelectedDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
+  const [selectedClassId, setSelectedClassId] = useState<string>('');
+  const [isMarkingOpen, setIsMarkingOpen] = useState(false);
+  const [markingData, setMarkingData] = useState<Record<string, 'Present' | 'Absent'>>({});
+
+  const activeClasses = classes.filter(c => c.status === 'Active').sort((a, b) => a.name.localeCompare(b.name));
+  
+  // Classes that have sessions on the selected date
+  const classesWithSessionsToday = useMemo(() => {
+    const sessionClassIds = sessions
+      .filter(s => safeFormat(s.startTime, 'yyyy-MM-dd') === selectedDate)
+      .map(s => s.classId);
+    return activeClasses.filter(c => sessionClassIds.includes(c.id));
+  }, [sessions, selectedDate, activeClasses]);
+
+  const selectedClass = classes.find(c => c.id === selectedClassId);
+  const classStudents = students
+    .filter(s => s.classIds.includes(selectedClassId) && s.status !== 'Done')
+    .sort((a, b) => a.studentId.localeCompare(b.studentId));
+
+  const attendanceHistoryDates = useMemo(() => {
+    if (!selectedClassId) return [];
+    const dates = attendanceRecords
+      .filter(r => r.classId === selectedClassId)
+      .map(r => r.date)
+      .sort((a, b) => a.localeCompare(b)); // Chronological order
+    return Array.from(new Set(dates)).slice(-10); // Last 10 sessions
+  }, [attendanceRecords, selectedClassId]);
+
+  const handleMarkAttendance = () => {
+    if (!selectedClassId) return;
+    const existingRecord = attendanceRecords.find(r => r.classId === selectedClassId && r.date === selectedDate);
+    const initialData: Record<string, 'Present' | 'Absent'> = {};
+    
+    classStudents.forEach(s => {
+      const studentStatus = existingRecord?.students.find(rs => rs.studentId === s.id)?.status;
+      initialData[s.id] = studentStatus || 'Present';
+    });
+    
+    setMarkingData(initialData);
+    setIsMarkingOpen(true);
+  };
+
+  const saveAttendance = async () => {
+    const existingRecord = attendanceRecords.find(r => r.classId === selectedClassId && r.date === selectedDate);
+    const recordData = {
+      classId: selectedClassId,
+      date: selectedDate,
+      students: Object.entries(markingData).map(([studentId, status]) => ({
+        studentId,
+        status
+      }))
+    };
+
+    if (existingRecord) {
+      await updateDoc(doc(db, 'attendanceRecords', existingRecord.id), recordData);
+    } else {
+      await addDoc(collection(db, 'attendanceRecords'), recordData);
+    }
+
+    // Update session status if exists
+    const sessionToday = sessions.find(s => s.classId === selectedClassId && safeFormat(s.startTime, 'yyyy-MM-dd') === selectedDate);
+    if (sessionToday) {
+      await updateDoc(doc(db, 'sessions', sessionToday.id), { 
+        attendanceStatus: 'Done',
+        status: 'Done' 
+      });
+    }
+
+    setIsMarkingOpen(false);
+  };
+
+  return (
+    <div className="flex flex-col h-full bg-white rounded-[32px] border border-black/5 shadow-sm overflow-hidden">
+      <div className="p-6 border-b border-black/5 bg-gray-50/50 flex justify-between items-center">
+        <div className="flex items-center gap-4">
+          <Select value={selectedClassId} onChange={e => setSelectedClassId(e.target.value)} className="w-64">
+            <option value="">Chọn lớp học</option>
+            {classesWithSessionsToday.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </Select>
+          <Button 
+            disabled={!selectedClassId}
+            onClick={handleMarkAttendance}
+            className="bg-blue-600 text-white hover:bg-blue-700 text-xs py-2"
+          >
+            Điểm danh
+          </Button>
+        </div>
+
+        <div className="flex items-center gap-2 bg-black/5 p-1 rounded-xl">
+          <button 
+            onClick={() => {
+              const d = parseISO(selectedDate);
+              setSelectedDate(format(addDays(d, -1), 'yyyy-MM-dd'));
+            }}
+            className="p-1.5 hover:bg-white rounded-lg transition-all"
+          >
+            <ChevronLeft size={16} />
+          </button>
+          <div className="relative">
+            <input 
+              type="date" 
+              value={selectedDate} 
+              onChange={e => setSelectedDate(e.target.value)}
+              className="absolute inset-0 opacity-0 cursor-pointer"
+            />
+            <span className="text-sm font-bold px-2 min-w-[120px] text-center block">
+              {safeFormat(selectedDate, 'dd/MM/yyyy')}
+            </span>
+          </div>
+          <button 
+            className="p-1.5 hover:bg-white rounded-lg transition-all"
+            onClick={() => {
+              const d = parseISO(selectedDate);
+              setSelectedDate(format(addDays(d, 1), 'yyyy-MM-dd'));
+            }}
+          >
+            <ChevronRight size={16} />
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-auto relative">
+        {selectedClassId ? (
+          <table className="w-full text-left border-collapse min-w-max">
+            <thead className="sticky top-0 z-20 bg-gray-100 shadow-sm">
+              <tr>
+                <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5 sticky left-0 z-30 bg-gray-100 w-12 text-center">STT</th>
+                <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5 sticky left-12 z-30 bg-gray-100 w-48">Học viên</th>
+                <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5 text-center">Status</th>
+                {attendanceHistoryDates.map(date => (
+                  <th key={date} className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5 text-center min-w-[80px]">
+                    {safeFormat(date, 'dd/MM')}
+                  </th>
+                ))}
+                <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5 text-center min-w-[100px] sticky right-0 z-30 bg-gray-100 shadow-[-4px_0_8px_rgba(0,0,0,0.05)]">Tổng (Học/Vắng)</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-black/5">
+              {classStudents.map((s, idx) => {
+                const studentRecords = attendanceRecords.filter(r => r.classId === selectedClassId);
+                const totalPresent = studentRecords.filter(r => r.students.find(rs => rs.studentId === s.id)?.status === 'Present').length;
+                const totalAbsences = studentRecords.filter(r => r.students.find(rs => rs.studentId === s.id)?.status === 'Absent').length;
+                
+                return (
+                  <tr key={s.id} className="hover:bg-black/[0.02] transition-colors group">
+                    <td className="p-4 text-sm font-mono text-black/30 sticky left-0 z-10 bg-white group-hover:bg-gray-50 border-r border-black/5 text-center">{idx + 1}</td>
+                    <td className="p-4 text-sm font-bold sticky left-12 z-10 bg-white group-hover:bg-gray-50 border-r border-black/5">
+                      <div className="flex flex-col">
+                        <span>{s.name}</span>
+                        <span className="text-[10px] text-black/40 font-mono">{s.studentId}</span>
+                      </div>
+                    </td>
+                    <td className="p-4 text-xs text-center">
+                      <span className={cn(
+                        "px-2 py-0.5 rounded-full font-bold uppercase tracking-tighter",
+                        s.status === 'Study' ? "bg-emerald-100 text-emerald-600" : "bg-gray-100 text-gray-400"
+                      )}>
+                        {s.status}
+                      </span>
+                    </td>
+                    {attendanceHistoryDates.map(date => {
+                      const record = attendanceRecords.find(r => r.classId === selectedClassId && r.date === date);
+                      const status = record?.students.find(rs => rs.studentId === s.id)?.status;
+                      return (
+                        <td key={date} className="p-4 text-sm text-center border-l border-black/5">
+                          {status === 'Present' ? (
+                            <Check size={16} className="text-emerald-600 mx-auto" />
+                          ) : status === 'Absent' ? (
+                            <X size={16} className="text-red-600 mx-auto" />
+                          ) : (
+                            <span className="text-black/10">-</span>
+                          )}
+                        </td>
+                      );
+                    })}
+                    <td className="p-4 text-sm font-bold text-center border-l border-black/5 sticky right-0 z-10 bg-white group-hover:bg-gray-50 shadow-[-4px_0_8px_rgba(0,0,0,0.05)]">
+                      <span className="text-emerald-600">{totalPresent}</span>
+                      <span className="text-black/20 mx-1">/</span>
+                      <span className="text-red-600">{totalAbsences}</span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : (
+          <div className="h-full flex flex-col items-center justify-center text-black/20 p-12 text-center">
+            <Check size={48} className="mb-4" />
+            <h3 className="text-xl font-bold text-black/40">Chọn lớp để xem điểm danh</h3>
+          </div>
+        )}
+      </div>
+
+      {isMarkingOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/20 backdrop-blur-sm">
+          <div className="bg-white rounded-[40px] shadow-2xl border border-black/5 w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-8 border-b border-black/5 bg-gray-50/50 flex justify-between items-center">
+              <div>
+                <h2 className="text-2xl font-bold">Điểm danh lớp {selectedClass?.name}</h2>
+                <p className="text-sm text-black/40 font-medium">Ngày {safeFormat(selectedDate, 'dd/MM/yyyy')}</p>
+              </div>
+              <button onClick={() => setIsMarkingOpen(false)} className="p-2 hover:bg-black/5 rounded-full transition-colors">
+                <X size={24} />
+              </button>
+            </div>
+            <div className="p-8 max-h-[60vh] overflow-auto">
+              <div className="space-y-2">
+                {classStudents.map((s, idx) => (
+                  <div key={s.id} className="flex items-center justify-between p-4 bg-black/[0.02] rounded-2xl">
+                    <div className="flex items-center gap-4">
+                      <span className="text-xs font-mono text-black/30 w-6">{idx + 1}</span>
+                      <div>
+                        <p className="font-bold text-sm">{s.name}</p>
+                        <p className="text-[10px] text-black/40 font-mono">{s.studentId}</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => setMarkingData({ ...markingData, [s.id]: 'Present' })}
+                        className={cn(
+                          "px-4 py-2 rounded-xl text-xs font-bold transition-all border",
+                          markingData[s.id] === 'Present' 
+                            ? "bg-emerald-600 text-white border-emerald-600 shadow-md" 
+                            : "bg-white text-black/40 border-black/10 hover:border-black/30"
+                        )}
+                      >
+                        Có mặt
+                      </button>
+                      <button 
+                        onClick={() => setMarkingData({ ...markingData, [s.id]: 'Absent' })}
+                        className={cn(
+                          "px-4 py-2 rounded-xl text-xs font-bold transition-all border",
+                          markingData[s.id] === 'Absent' 
+                            ? "bg-red-600 text-white border-red-600 shadow-md" 
+                            : "bg-white text-black/40 border-black/10 hover:border-black/30"
+                        )}
+                      >
+                        Vắng mặt
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="p-8 border-t border-black/5 flex gap-3">
+              <Button onClick={() => setIsMarkingOpen(false)} className="flex-1 bg-black/5 hover:bg-black/10">Hủy</Button>
+              <Button onClick={saveAttendance} className="flex-1 bg-blue-600 text-white hover:bg-blue-700">Lưu điểm danh</Button>
             </div>
           </div>
         </div>

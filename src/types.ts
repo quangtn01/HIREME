@@ -77,6 +77,7 @@ export interface Session {
   notes?: string;
   weekStart: string; // YYYY-MM-DD
   status?: 'Upcoming' | 'Done';
+  attendanceStatus?: 'Not Done' | 'Done';
 }
 
 export interface LeaveUsage {
@@ -113,4 +114,14 @@ export interface TuitionRecord {
   paymentDate: string; // YYYY-MM-DD
   amount: number | 'DONE';
   note?: string;
+}
+
+export interface AttendanceRecord {
+  id: string;
+  classId: string;
+  date: string; // YYYY-MM-DD
+  students: {
+    studentId: string;
+    status: 'Present' | 'Absent';
+  }[];
 }
