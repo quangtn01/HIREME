@@ -41,6 +41,7 @@ export interface Class {
   programId: string;
   status: 'Active' | 'Archived';
   teacherId: string;
+  coTeacherId?: string;
   taId?: string;
   startDate: string; // YYYY-MM-DD
   endDate: string;   // YYYY-MM-DD

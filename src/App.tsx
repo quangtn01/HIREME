@@ -336,7 +336,9 @@ const NAV_STRUCTURE = [
     icon: <BookOpen size={18} />,
     isOpenKey: 'isCourseOpen',
     pages: [
+      { id: 'course-summary', label: 'Summary', icon: <Grid size={16} /> },
       { id: 'course-dashboard', label: 'Dashboard', icon: <LayoutDashboard size={16} /> },
+      { id: 'course-byClass', label: 'By Class', icon: <BookOpen size={16} /> },
       { id: 'course-details', label: 'Course Details', icon: <BookOpen size={16} /> },
       { id: 'course-tuition', label: 'Tuition Class', icon: <Briefcase size={16} /> },
       { id: 'course-attendance', label: 'Attendance', icon: <Check size={16} /> },
@@ -349,7 +351,6 @@ const NAV_STRUCTURE = [
     pages: [
       { id: 'student-details', label: 'Details', icon: <Users size={16} /> },
       { id: 'student-summary', label: 'Summary', icon: <Grid size={16} /> },
-      { id: 'student-byClass', label: 'By Class', icon: <BookOpen size={16} /> },
     ]
   },
   {
@@ -374,7 +375,7 @@ const NAV_STRUCTURE = [
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const [activeTab, setActiveTab] = useState<string>('timetable-teacher');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isTimetableOpen, setIsTimetableOpen] = useState(true);
   const [isCourseOpen, setIsCourseOpen] = useState(false);
@@ -1278,7 +1279,7 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
                                     key={session.id}
                                     onClick={(e) => { e.stopPropagation(); onAddSession(session); }}
                                     className={cn(
-                                      "p-2 border rounded-xl flex flex-col justify-center overflow-hidden transition-all",
+                                      "p-2 border rounded-xl flex flex-col justify-center overflow-hidden transition-all relative",
                                       session.status === 'Done'
                                         ? "bg-gray-100 border-gray-200 opacity-60"
                                         : "bg-emerald-50 border-emerald-100 hover:bg-emerald-100"
@@ -1307,6 +1308,11 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
                                       </p>
                                     )}
                                     {session.zoomId && <p className="text-[8px] text-emerald-500 font-mono truncate mt-0.5">Z: {session.zoomId}</p>}
+                                    {session.attendanceStatus === 'Done' && (
+                                      <div className="absolute bottom-1 right-1">
+                                        <Check size={10} className="text-orange-500" />
+                                      </div>
+                                    )}
                                   </div>
                                 ))}
                                 {slotSessions.length === 0 && (
@@ -1688,7 +1694,7 @@ function TimetableTeacherView({ staff, sessions, classes, campuses, userEmail, s
     const initialData: Record<string, 'Present' | 'Absent'> = {};
     
     const classStudents = students
-      .filter(s => s.classIds.includes(session.classId) && s.status !== 'Done')
+      .filter(s => s.classIds.includes(session.classId) && (s.status === 'Study' || s.status === 'Trial'))
       .sort((a, b) => a.studentId.localeCompare(b.studentId));
 
     classStudents.forEach(s => {
@@ -1851,7 +1857,7 @@ function TimetableTeacherView({ staff, sessions, classes, campuses, userEmail, s
             <div className="p-8 max-h-[60vh] overflow-auto">
               <div className="space-y-2">
                 {students
-                  .filter(s => s.classIds.includes(activeSession.classId) && s.status !== 'Done')
+                  .filter(s => s.classIds.includes(activeSession.classId) && (s.status === 'Study' || s.status === 'Trial'))
                   .sort((a, b) => a.studentId.localeCompare(b.studentId))
                   .map((s, idx) => (
                     <div key={s.id} className="flex items-center justify-between p-4 bg-black/[0.02] rounded-2xl">
@@ -1940,7 +1946,7 @@ function StaffView({ staff, sessions, classes, campuses, jobTitles }: {
               </tr>
             </thead>
             <tbody>
-              {staff.sort((a, b) => (a.staffId || '').localeCompare(b.staffId || '')).map(member => (
+              {staff.filter(member => member.status === 'Working').sort((a, b) => (a.staffId || '').localeCompare(b.staffId || '')).map(member => (
                 <React.Fragment key={member.id}>
                   {SLOTS.map((slot, slotIdx) => (
                     <tr key={`${member.id}-${slot.id}`}>
@@ -1973,7 +1979,7 @@ function StaffView({ staff, sessions, classes, campuses, jobTitles }: {
                                 <div 
                                   key={session.id}
                                   className={cn(
-                                    "p-2 border rounded-xl flex flex-col justify-center overflow-hidden transition-all",
+                                    "p-2 border rounded-xl flex flex-col justify-center overflow-hidden transition-all relative",
                                     session.status === 'Done'
                                       ? "bg-gray-100 border-gray-200 opacity-60"
                                       : "bg-emerald-50 border-emerald-100"
@@ -1997,6 +2003,11 @@ function StaffView({ staff, sessions, classes, campuses, jobTitles }: {
                                     {campuses.find(c => c.id === session.campusId)?.name} - {session.room}
                                   </p>
                                   {session.zoomId && <p className="text-[8px] text-emerald-500 font-mono truncate mt-0.5">Z: {session.zoomId}</p>}
+                                  {session.attendanceStatus === 'Done' && (
+                                    <div className="absolute bottom-1 right-1">
+                                      <Check size={10} className="text-orange-500" />
+                                    </div>
+                                  )}
                                 </div>
                               ))}
                               {slotSessions.length === 0 && (
@@ -3701,8 +3712,197 @@ function CourseDashboard({ classes, programs, staff, campuses }: { classes: Clas
   );
 }
 
+function CourseSummaryView({ classes, programs, staff, students }: { 
+  classes: Class[], 
+  programs: Program[], 
+  staff: Staff[], 
+  students: Student[] 
+}) {
+  const [selectedProgramId, setSelectedProgramId] = useState<string>('all');
+  const [selectedStatus, setSelectedStatus] = useState<string>('Active');
+
+  const filteredClasses = classes.filter(c => {
+    const matchesProgram = selectedProgramId === 'all' || c.programId === selectedProgramId;
+    const matchesStatus = selectedStatus === 'all' || c.status === selectedStatus;
+    return matchesProgram && matchesStatus;
+  });
+
+  const sortedPrograms = [...programs].sort((a, b) => {
+    if (a.name === "SẮP KHAI GIẢNG") return -1;
+    if (b.name === "SẮP KHAI GIẢNG") return 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  const getStudentsInClass = (classId: string) => {
+    return students.filter(s => s.classIds.includes(classId) && s.status === 'Study').length;
+  };
+
+  const formatSchedule = (schedule: ScheduleItem[]) => {
+    if (!schedule || schedule.length === 0) return '-';
+    return schedule.map(item => {
+      const day = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][item.dayOfWeek];
+      return `${day} (${item.slot})`;
+    }).join(', ');
+  };
+
+  const totalClassesAll = filteredClasses.length;
+  const totalStudentsAll = filteredClasses.reduce((acc, c) => acc + getStudentsInClass(c.id), 0);
+
+  const renderClassRow = (c: Class) => {
+    const teacher = staff.find(s => s.staffId === c.teacherId);
+    const coTeacher = staff.find(s => s.staffId === c.coTeacherId);
+    const ta = staff.find(s => s.staffId === c.taId);
+    const studentCount = getStudentsInClass(c.id);
+
+    return (
+      <tr key={c.id} className="hover:bg-black/[0.02] transition-colors">
+        <td className="p-4 text-sm font-medium">{c.name}</td>
+        <td className="p-4 text-xs text-black/50">
+          {safeFormat(c.startDate)} - {safeFormat(c.endDate)}
+        </td>
+        <td className="p-4 text-xs">
+          <div className="flex flex-col">
+            <span className="font-medium">{teacher?.name || 'N/A'}</span>
+            {coTeacher && <span className="text-black/40 italic">Co: {coTeacher.name}</span>}
+          </div>
+        </td>
+        <td className="p-4 text-xs text-black/50">{ta?.name || '-'}</td>
+        <td className="p-4 text-sm text-center font-bold">{studentCount}</td>
+        <td className="p-4 text-[10px] text-black/50 max-w-[200px] truncate">
+          {formatSchedule(c.schedule)}
+        </td>
+        <td className="p-4">
+          <span className={cn(
+            "px-2 py-0.5 rounded-full text-[10px] font-bold uppercase",
+            c.status === 'Active' ? "bg-emerald-100 text-emerald-600" : "bg-gray-100 text-gray-400"
+          )}>
+            {c.status}
+          </span>
+        </td>
+      </tr>
+    );
+  };
+
+  return (
+    <div className="flex flex-col h-full bg-white rounded-[32px] border border-black/5 shadow-sm overflow-hidden">
+      <div className="p-6 border-b border-black/5 bg-gray-50/50 flex justify-between items-center">
+        <h2 className="text-xl font-bold flex items-center gap-2">
+          <Grid size={20} className="text-emerald-600" />
+          Course Summary
+        </h2>
+        <div className="flex items-center gap-2">
+          <label className="text-xs font-bold text-black/40 uppercase">Program:</label>
+          <Select 
+            value={selectedProgramId} 
+            onChange={e => setSelectedProgramId(e.target.value)}
+            className="w-48"
+          >
+            <option value="all">All Programs</option>
+            {sortedPrograms.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </Select>
+          <label className="text-xs font-bold text-black/40 uppercase ml-4">Status:</label>
+          <Select 
+            value={selectedStatus} 
+            onChange={e => setSelectedStatus(e.target.value)}
+            className="w-32"
+          >
+            <option value="Active">Active</option>
+            <option value="Archived">Archived</option>
+            <option value="all">All</option>
+          </Select>
+        </div>
+      </div>
+
+      {selectedProgramId === 'all' && (
+        <div className="px-6 py-4 bg-emerald-50/50 border-b border-emerald-100/50 flex justify-center gap-16">
+          <div className="text-center">
+            <p className="text-[10px] font-bold text-emerald-600/60 uppercase tracking-widest mb-1">Total Classes</p>
+            <p className="text-3xl font-black text-emerald-900">{totalClassesAll}</p>
+          </div>
+          <div className="text-center">
+            <p className="text-[10px] font-bold text-emerald-600/60 uppercase tracking-widest mb-1">Total Active Students</p>
+            <p className="text-3xl font-black text-emerald-900">{totalStudentsAll}</p>
+          </div>
+        </div>
+      )}
+
+      <div className="flex-1 overflow-auto">
+        <table className="w-full text-left border-collapse">
+          <thead className="sticky top-0 z-20 bg-gray-100 shadow-sm">
+            <tr>
+              <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Class Name</th>
+              <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Dates</th>
+              <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Teachers</th>
+              <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">TA</th>
+              <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5 text-center">Students</th>
+              <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Schedule</th>
+              <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Status</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-black/5">
+            {sortedPrograms.map(program => {
+              const programClasses = filteredClasses
+                .filter(c => c.programId === program.id)
+                .sort((a, b) => a.name.localeCompare(b.name));
+              
+              if (programClasses.length === 0) return null;
+
+              const totalStudentsProgram = programClasses.reduce((acc, c) => acc + getStudentsInClass(c.id), 0);
+
+              return (
+                <React.Fragment key={program.id}>
+                  <tr className="bg-gray-100/80 font-bold border-t border-black/10">
+                    <td className="p-4 text-sm uppercase tracking-wider text-black/70">
+                      {program.name} ({programClasses.length} classes)
+                    </td>
+                    <td className="p-4"></td>
+                    <td className="p-4"></td>
+                    <td className="p-4"></td>
+                    <td className="p-4 text-sm text-center text-black/70">{totalStudentsProgram}</td>
+                    <td className="p-4"></td>
+                    <td className="p-4"></td>
+                  </tr>
+                  {programClasses.map(c => renderClassRow(c))}
+                </React.Fragment>
+              );
+            })}
+
+            {/* Uncategorized */}
+            {(() => {
+              const uncategorizedClasses = filteredClasses
+                .filter(c => !c.programId || !programs.find(p => p.id === c.programId))
+                .sort((a, b) => a.name.localeCompare(b.name));
+              
+              if (uncategorizedClasses.length === 0) return null;
+
+              const totalStudentsUncategorized = uncategorizedClasses.reduce((acc, c) => acc + getStudentsInClass(c.id), 0);
+
+              return (
+                <React.Fragment>
+                  <tr className="bg-gray-100/80 font-bold border-t border-black/10">
+                    <td className="p-4 text-sm uppercase tracking-wider text-black/70">
+                      UNCATEGORIZED ({uncategorizedClasses.length} classes)
+                    </td>
+                    <td className="p-4"></td>
+                    <td className="p-4"></td>
+                    <td className="p-4"></td>
+                    <td className="p-4 text-sm text-center text-black/70">{totalStudentsUncategorized}</td>
+                    <td className="p-4"></td>
+                    <td className="p-4"></td>
+                  </tr>
+                  {uncategorizedClasses.map(c => renderClassRow(c))}
+                </React.Fragment>
+              );
+            })()}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function CourseView({ subTab, classes, programs, staff, campuses, jobTitles, students, tuitionRecords, attendanceRecords, sessions }: { 
-  subTab: 'dashboard' | 'details' | 'tuition' | 'attendance',
+  subTab: 'dashboard' | 'details' | 'tuition' | 'attendance' | 'summary' | 'byClass',
   classes: Class[], programs: Program[], staff: Staff[], campuses: Campus[], jobTitles: JobTitle[],
   students: Student[], tuitionRecords: TuitionRecord[], attendanceRecords: AttendanceRecord[],
   sessions: Session[]
@@ -3717,6 +3917,7 @@ function CourseView({ subTab, classes, programs, staff, campuses, jobTitles, stu
     const dataToExport = filteredClasses.map(c => {
       const program = programs.find(p => p.id === c.programId);
       const teacher = staff.find(s => s.staffId === c.teacherId);
+      const coTeacher = staff.find(s => s.staffId === c.coTeacherId);
       const ta = staff.find(s => s.staffId === c.taId);
 
       return {
@@ -3726,6 +3927,8 @@ function CourseView({ subTab, classes, programs, staff, campuses, jobTitles, stu
         'Status': c.status,
         'Teacher ID': c.teacherId || '',
         'Teacher Name': teacher?.name || '',
+        'Co-Teacher ID': c.coTeacherId || '',
+        'Co-Teacher Name': coTeacher?.name || '',
         'TA ID': c.taId || '',
         'TA Name': ta?.name || '',
         'Start Date': formatExcelDate(c.startDate),
@@ -3762,6 +3965,7 @@ function CourseView({ subTab, classes, programs, staff, campuses, jobTitles, stu
           programId: programs.find(p => p.name === getValue(row, ['Program', 'Chương trình']))?.id || '',
           status: getValue(row, ['Status', 'Trạng thái']) || 'Active',
           teacherId: getValue(row, ['Teacher ID', 'Mã GV']) || '',
+          coTeacherId: getValue(row, ['Co-Teacher ID', 'Mã Co-GV']) || '',
           taId: getValue(row, ['TA ID', 'Mã TA']) || '',
           startDate: normalizeImportDate(getValue(row, ['Start Date', 'Ngày bắt đầu'])),
           endDate: normalizeImportDate(getValue(row, ['End Date', 'Ngày kết thúc'])),
@@ -3797,6 +4001,7 @@ function CourseView({ subTab, classes, programs, staff, campuses, jobTitles, stu
       programId: editingClass.programId,
       status: editingClass.status || 'Active',
       teacherId: editingClass.teacherId,
+      coTeacherId: editingClass.coTeacherId || '',
       taId: editingClass.taId || '',
       startDate: editingClass.startDate || format(new Date(), 'yyyy-MM-dd'),
       endDate: editingClass.endDate || format(addWeeks(new Date(), 12), 'yyyy-MM-dd'),
@@ -3854,8 +4059,12 @@ function CourseView({ subTab, classes, programs, staff, campuses, jobTitles, stu
 
   return (
     <div className="flex flex-col h-full">
-      {subTab === 'dashboard' ? (
+      {subTab === 'summary' ? (
+        <CourseSummaryView classes={classes} programs={programs} staff={staff} students={students} />
+      ) : subTab === 'dashboard' ? (
         <CourseDashboard classes={classes} programs={programs} staff={staff} campuses={campuses} />
+      ) : subTab === 'byClass' ? (
+        <StudentView subTab="byClass" students={students} classes={classes} />
       ) : subTab === 'tuition' ? (
         <TuitionView classes={classes} students={students} tuitionRecords={tuitionRecords} />
       ) : subTab === 'attendance' ? (
@@ -3923,7 +4132,9 @@ function CourseView({ subTab, classes, programs, staff, campuses, jobTitles, stu
                           <div>
                             <p className="font-bold text-sm">{c.name}</p>
                             <p className="text-[10px] text-black/40">
-                              {staff.find(s => s.staffId === c.teacherId)?.name || 'No Teacher'} • {c.status} • {safeFormat(c.startDate)} - {safeFormat(c.endDate)}
+                              {staff.find(s => s.staffId === c.teacherId)?.name || 'No Teacher'}
+                              {c.coTeacherId && ` & ${staff.find(s => s.staffId === c.coTeacherId)?.name}`}
+                              • {c.status} • {safeFormat(c.startDate)} - {safeFormat(c.endDate)}
                             </p>
                           </div>
                         </div>
@@ -3992,6 +4203,16 @@ function CourseView({ subTab, classes, programs, staff, campuses, jobTitles, stu
                         {staff.filter(s => s.jobTitleIds?.includes(jobTitles.find(jt => jt.name === 'Teacher')?.id || '') || s.jobTitleIds?.includes(jobTitles.find(jt => jt.name === 'Teacher')?.id || '')).map(s => <option key={s.staffId} value={s.staffId}>{s.staffId} - {s.name}</option>)}
                       </select>
                     </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Co-Teacher (Optional)</label>
+                      <select className="w-full bg-black/[0.02] border border-black/5 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/20 transition-all" value={editingClass?.coTeacherId || ''} onChange={e => setEditingClass({...editingClass, coTeacherId: e.target.value})}>
+                        <option value="">Select Co-Teacher</option>
+                        {staff.filter(s => s.jobTitleIds?.includes(jobTitles.find(jt => jt.name === 'Teacher')?.id || '')).map(s => <option key={s.staffId} value={s.staffId}>{s.staffId} - {s.name}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1">
                       <label className="text-[10px] uppercase font-bold text-black/40 ml-1">TA (Optional)</label>
                       <select className="w-full bg-black/[0.02] border border-black/5 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/20 transition-all" value={editingClass?.taId || ''} onChange={e => setEditingClass({...editingClass, taId: e.target.value})}>
@@ -4358,17 +4579,27 @@ function AttendanceView({ classes, students, attendanceRecords, sessions }: {
 
   const selectedClass = classes.find(c => c.id === selectedClassId);
   const classStudents = students
-    .filter(s => s.classIds.includes(selectedClassId) && s.status !== 'Done')
+    .filter(s => s.classIds.includes(selectedClassId) && (s.status === 'Study' || s.status === 'Trial'))
     .sort((a, b) => a.studentId.localeCompare(b.studentId));
 
   const attendanceHistoryDates = useMemo(() => {
     if (!selectedClassId) return [];
-    const dates = attendanceRecords
+    
+    // Get dates from attendance records
+    const recordDates = attendanceRecords
       .filter(r => r.classId === selectedClassId)
-      .map(r => r.date)
-      .sort((a, b) => a.localeCompare(b)); // Chronological order
-    return Array.from(new Set(dates)).slice(-10); // Last 10 sessions
-  }, [attendanceRecords, selectedClassId]);
+      .map(r => r.date);
+      
+    // Get dates from sessions
+    const sessionDates = sessions
+      .filter(s => s.classId === selectedClassId)
+      .map(s => safeFormat(s.startTime, 'yyyy-MM-dd'));
+      
+    const allDates = Array.from(new Set([...recordDates, ...sessionDates]))
+      .sort((a, b) => a.localeCompare(b));
+      
+    return allDates;
+  }, [attendanceRecords, selectedClassId, sessions]);
 
   const handleMarkAttendance = () => {
     if (!selectedClassId) return;

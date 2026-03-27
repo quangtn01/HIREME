@@ -559,6 +559,7 @@ export function StudentView({ subTab, students, classes }: {
                   <th className="p-4 text-[10px] uppercase tracking-widest font-bold text-black/40">Student ID</th>
                   <th className="p-4 text-[10px] uppercase tracking-widest font-bold text-black/40">Full Name</th>
                   <th className="p-4 text-[10px] uppercase tracking-widest font-bold text-black/40">Status</th>
+                  <th className="p-4 text-[10px] uppercase tracking-widest font-bold text-black/40">Enrolled Classes</th>
                   <th className="p-4 text-[10px] uppercase tracking-widest font-bold text-black/40">Phone</th>
                 </tr>
               </thead>
@@ -579,6 +580,28 @@ export function StudentView({ subTab, students, classes }: {
                       )}>
                         {student.status}
                       </span>
+                    </td>
+                    <td className="p-4">
+                      <div className="flex flex-wrap gap-1 max-w-[300px]">
+                        {student.classIds.map(id => {
+                          const cls = classes.find(c => c.id === id);
+                          if (!cls) return null;
+                          return (
+                            <span 
+                              key={id} 
+                              className={cn(
+                                "px-2 py-0.5 rounded-md text-[10px] font-bold border",
+                                cls.status === 'Active' 
+                                  ? "bg-emerald-50 text-emerald-600 border-emerald-100" 
+                                  : "bg-gray-50 text-gray-400 border-gray-100"
+                              )}
+                            >
+                              {cls.name}
+                            </span>
+                          );
+                        })}
+                        {student.classIds.length === 0 && <span className="text-black/20 italic text-[10px]">None</span>}
+                      </div>
                     </td>
                     <td className="p-4 text-sm">{student.phone}</td>
                   </tr>
