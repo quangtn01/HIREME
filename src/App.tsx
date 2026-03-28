@@ -5003,78 +5003,95 @@ function TuitionView({ classes, students, tuitionRecords }: { classes: Class[], 
       {/* Notification Modal */}
       {showNotificationModal && selectedStudentForAction && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/20 backdrop-blur-sm">
-          <div className="bg-white rounded-[32px] shadow-2xl border border-black/5 w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[95vh]">
-            <div className="p-6 border-b border-black/5 bg-blue-50/50 shrink-0">
-              <h2 className="text-xl font-bold text-blue-900">Thông báo học phí</h2>
-              <p className="text-xs text-blue-600/60 font-medium">Trung Tâm Ngoại Ngữ Hireme</p>
-            </div>
-            <div className="p-6 space-y-4 overflow-y-auto">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-[9px] uppercase font-bold text-black/30 tracking-widest block mb-0.5">Học viên</label>
-                  <p className="font-bold text-base">{selectedStudentForAction.name}</p>
-                </div>
-                <div>
-                  <label className="text-[9px] uppercase font-bold text-black/30 tracking-widest block mb-0.5">Lớp</label>
-                  <p className="font-bold text-base">{selectedClass?.name}</p>
-                </div>
+          <div className="bg-white rounded-[32px] shadow-2xl border border-black/5 w-full max-w-3xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[95vh]">
+            <div className="p-6 border-b border-black/5 bg-blue-50/50 shrink-0 flex justify-between items-start">
+              <div>
+                <h2 className="text-xl font-bold text-blue-900">Thông báo học phí</h2>
+                <p className="text-xs text-blue-600/60 font-medium">Trung Tâm Ngoại Ngữ Hireme</p>
               </div>
+              <button 
+                onClick={() => setShowNotificationModal(false)}
+                className="p-2 hover:bg-blue-100/50 rounded-full text-blue-900/40 hover:text-blue-900 transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-8 overflow-y-auto">
+              {(() => {
+                const currentMonth = format(new Date(), 'yyyy-MM');
+                const studentRecords = tuitionRecords.filter(r => r.studentId === selectedStudentForAction.id && r.classId === selectedClassId);
+                const currentMonthRecord = studentRecords.find(r => r.month === currentMonth);
+                const previousDebt = studentRecords
+                  .filter(r => r.month < currentMonth)
+                  .reduce((sum, r) => sum + (r.owedAmount || 0), 0);
+                const currentOwed = currentMonthRecord?.owedAmount || 0;
+                const total = currentOwed + previousDebt;
+                const transferContent = `${selectedStudentForAction.name} - ${selectedClass?.name}`;
+                const qrUrl = `https://img.vietqr.io/image/vietcombank-0081001333974-compact.png?amount=${total}&addInfo=${encodeURIComponent(transferContent)}&accountName=CT%20TNHH%20DAO%20TAO%20TIENG%20ANH%20HIREME`;
 
-              <div className="bg-gray-50 rounded-xl p-4 space-y-2">
-                {(() => {
-                  const currentMonth = format(new Date(), 'yyyy-MM');
-                  const studentRecords = tuitionRecords.filter(r => r.studentId === selectedStudentForAction.id && r.classId === selectedClassId);
-                  const currentMonthRecord = studentRecords.find(r => r.month === currentMonth);
-                  const previousDebt = studentRecords
-                    .filter(r => r.month < currentMonth)
-                    .reduce((sum, r) => sum + (r.owedAmount || 0), 0);
-                  const currentOwed = currentMonthRecord?.owedAmount || 0;
-                  const total = currentOwed + previousDebt;
-                  const transferContent = `${selectedStudentForAction.name} - ${selectedClass?.name}`;
-                  const qrUrl = `https://img.vietqr.io/image/vietcombank-0081001333974-compact.png?amount=${total}&addInfo=${encodeURIComponent(transferContent)}&accountName=CT%20TNHH%20DAO%20TAO%20TIENG%20ANH%20HIREME`;
-
-                  return (
-                    <>
-                      <div className="flex justify-between items-center text-xs">
-                        <span className="text-black/40">Học phí tháng này ({format(new Date(), 'MM/yyyy')}):</span>
-                        <span className="font-bold">{new Intl.NumberFormat('vi-VN').format(currentOwed)} đ</span>
-                      </div>
-                      <div className="flex justify-between items-center text-xs">
-                        <span className="text-black/40">Nợ cũ:</span>
-                        <span className="font-bold text-red-600">{new Intl.NumberFormat('vi-VN').format(previousDebt)} đ</span>
-                      </div>
-                      <div className="h-px bg-black/5 my-1" />
-                      <div className="flex justify-between items-center">
-                        <span className="font-bold text-base">Tổng cộng:</span>
-                        <span className="font-bold text-xl text-blue-600">{new Intl.NumberFormat('vi-VN').format(total)} đ</span>
+                return (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                    {/* Left Column: Student Info & Calculation */}
+                    <div className="space-y-6">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-[9px] uppercase font-bold text-black/30 tracking-widest block mb-0.5">Học viên</label>
+                          <p className="font-bold text-base">{selectedStudentForAction.name}</p>
+                        </div>
+                        <div>
+                          <label className="text-[9px] uppercase font-bold text-black/30 tracking-widest block mb-0.5">Lớp</label>
+                          <p className="font-bold text-base">{selectedClass?.name}</p>
+                        </div>
                       </div>
 
-                      <div className="mt-4 pt-4 border-t border-black/5 space-y-3">
-                        <div className="text-center space-y-1">
-                          <p className="text-[9px] uppercase font-bold text-black/30 tracking-widest">Thông tin chuyển khoản</p>
-                          <p className="text-sm font-bold text-blue-900">Vietcombank: 0081001333974</p>
-                          <p className="text-[10px] text-black/60 uppercase font-medium">CT TNHH DAO TAO TIENG ANH HIREME</p>
-                          <p className="text-xs bg-blue-50 text-blue-700 py-1.5 px-3 rounded-lg font-mono inline-block">
-                            Nội dung: {transferContent}
+                      <div className="bg-gray-50 rounded-2xl p-6 space-y-3">
+                        <div className="flex justify-between items-center text-sm">
+                          <span className="text-black/40">Học phí tháng này ({format(new Date(), 'MM/yyyy')}):</span>
+                          <span className="font-bold">{new Intl.NumberFormat('vi-VN').format(currentOwed)} đ</span>
+                        </div>
+                        <div className="flex justify-between items-center text-sm">
+                          <span className="text-black/40">Nợ cũ:</span>
+                          <span className="font-bold text-red-600">{new Intl.NumberFormat('vi-VN').format(previousDebt)} đ</span>
+                        </div>
+                        <div className="h-px bg-black/5 my-2" />
+                        <div className="flex justify-between items-center">
+                          <span className="font-bold text-base">Tổng cộng:</span>
+                          <span className="font-bold text-2xl text-blue-600">{new Intl.NumberFormat('vi-VN').format(total)} đ</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Right Column: Transfer Info & QR */}
+                    <div className="flex flex-col items-center justify-center space-y-6">
+                      <div className="text-center space-y-2">
+                        <p className="text-[10px] uppercase font-bold text-black/30 tracking-widest">Thông tin chuyển khoản</p>
+                        <div className="space-y-1">
+                          <p className="text-base font-bold text-blue-900">Vietcombank: 0081001333974</p>
+                          <p className="text-[11px] text-black/60 uppercase font-semibold">CT TNHH DAO TAO TIENG ANH HIREME</p>
+                        </div>
+                        <div className="mt-3">
+                          <p className="text-[10px] text-black/40 mb-1 uppercase font-bold tracking-tighter">Nội dung chuyển khoản</p>
+                          <p className="text-xs bg-blue-50 text-blue-700 py-2 px-4 rounded-xl font-mono inline-block border border-blue-100">
+                            {transferContent}
                           </p>
                         </div>
-                        <div className="flex justify-center">
-                          <img 
-                            src={qrUrl} 
-                            alt="QR Code Chuyển khoản" 
-                            className="w-32 h-32 rounded-lg shadow-md border border-black/5"
-                            referrerPolicy="no-referrer"
-                          />
-                        </div>
                       </div>
-                    </>
-                  );
-                })()}
-              </div>
+
+                      <div className="relative group">
+                        <div className="absolute -inset-4 bg-blue-500/5 rounded-[40px] blur-2xl group-hover:bg-blue-500/10 transition-colors" />
+                        <img 
+                          src={qrUrl} 
+                          alt="QR Code Chuyển khoản" 
+                          className="relative w-48 h-48 md:w-56 md:h-56 rounded-2xl shadow-xl border border-black/5 bg-white p-2"
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
-            <div className="p-6 border-t border-black/5 shrink-0">
-              <Button onClick={() => setShowNotificationModal(false)} className="w-full bg-black text-white hover:bg-black/80 h-10 rounded-xl">Đóng</Button>
-            </div>
+            {/* Footer removed to save space */}
           </div>
         </div>
       )}
