@@ -96,7 +96,7 @@ export interface Student {
   nickname?: string;
   status: 'Study' | 'Trial' | 'Pending' | 'Done';
   gender?: 'Male' | 'Female' | 'Other';
-  birthYear?: number;
+  dob?: string; // YYYY-MM-DD
   phone?: string;
   classIds: string[]; // Many classes
   email?: string;
@@ -125,6 +125,7 @@ export interface WaitlistEntry {
   referrerStaffId?: string; // NV...
   consultantId: string; // NV... (Mandatory)
   desiredClassId?: string;
+  desiredProgramId: string; // Mandatory
   consultationCount: 1 | 2 | 3;
   status: 'Waiting' | 'Failed' | 'Enrolled';
   notes?: string;

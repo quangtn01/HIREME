@@ -56,11 +56,15 @@ import {
   Search,
   Clock,
   AlertCircle,
-  BarChart3
+  BarChart3,
+  BarChart2,
+  PieChart as PieChartIcon,
+  Target,
+  TrendingUp
 } from 'lucide-react';
 import { 
-  BarChart as ReBarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  PieChart as RePieChart, Pie, Cell, LineChart as ReLineChart, Line, AreaChart, Area
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  PieChart, Pie, Cell, LineChart, Line, AreaChart, Area
 } from 'recharts';
 import { format, startOfWeek, addDays, parseISO, isSameDay, addWeeks, subWeeks, addMinutes, addMonths, subMonths, startOfMonth, endOfMonth, differenceInDays, isAfter, isBefore, isWithinInterval, startOfDay, endOfDay, subMonths as subMonthsDateFns } from 'date-fns';
 import { formatInTimeZone, toZonedTime, fromZonedTime } from 'date-fns-tz';
@@ -427,6 +431,8 @@ const NAV_STRUCTURE = [
     isOpenKey: 'isOfficerOpen',
     pages: [
       { id: 'officer-waitlist', label: 'Waitlist', icon: <Users size={16} /> },
+      { id: 'officer-waitlistall', label: 'Waitlist All', icon: <Users size={16} /> },
+      { id: 'officer-dashboard', label: 'Dashboard', icon: <LayoutDashboard size={16} /> },
     ]
   },
   {
@@ -441,9 +447,12 @@ const NAV_STRUCTURE = [
   },
   {
     category: 'Management',
-    id: 'management',
     icon: <Settings size={18} />,
-    pages: [] // No sub-pages
+    isOpenKey: 'isManagementOpen',
+    pages: [
+      { id: 'management-setting', label: 'Setting', icon: <Settings size={16} /> },
+      { id: 'management-permissions', label: 'Permissions', icon: <Shield size={16} /> },
+    ]
   }
 ];
 
@@ -458,6 +467,7 @@ export default function App() {
   const [isTeacherOpen, setIsTeacherOpen] = useState(false);
   const [isOfficerOpen, setIsOfficerOpen] = useState(false);
   const [isReportOpen, setIsReportOpen] = useState(false);
+  const [isManagementOpen, setIsManagementOpen] = useState(false);
   const [campuses, setCampuses] = useState<Campus[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [classes, setClasses] = useState<Class[]>([]);
@@ -481,6 +491,7 @@ export default function App() {
     if (activeTab.startsWith('teacher')) setIsTeacherOpen(true);
     if (activeTab.startsWith('officer')) setIsOfficerOpen(true);
     if (activeTab.startsWith('report')) setIsReportOpen(true);
+    if (activeTab.startsWith('management')) setIsManagementOpen(true);
     if (['staff', 'dashboard2', 'dashboard'].includes(activeTab)) setIsTimetableOpen(true);
   }, [activeTab]);
 
@@ -661,8 +672,8 @@ export default function App() {
         </div>
         
         <nav className="flex-1 p-4 space-y-2">
-          {NAV_STRUCTURE.map(cat => {
-            const visiblePages = cat.pages.filter(p => hasPermission(p.id));
+          {NAV_STRUCTURE.map((cat: any) => {
+            const visiblePages = cat.pages.filter((p: any) => hasPermission(p.id));
             const isCategoryVisible = cat.id ? hasPermission(cat.id) : visiblePages.length > 0;
 
             if (!isCategoryVisible) return null;
@@ -685,14 +696,16 @@ export default function App() {
                            cat.isOpenKey === 'isStudentOpen' ? isStudentOpen :
                            cat.isOpenKey === 'isTeacherOpen' ? isTeacherOpen :
                            cat.isOpenKey === 'isOfficerOpen' ? isOfficerOpen :
-                           cat.isOpenKey === 'isReportOpen' ? isReportOpen : false;
+                           cat.isOpenKey === 'isReportOpen' ? isReportOpen :
+                           cat.isOpenKey === 'isManagementOpen' ? isManagementOpen : false;
             
             const setIsOpen = cat.isOpenKey === 'isTimetableOpen' ? setIsTimetableOpen :
                               cat.isOpenKey === 'isCourseOpen' ? setIsCourseOpen :
                               cat.isOpenKey === 'isStudentOpen' ? setIsStudentOpen :
                               cat.isOpenKey === 'isTeacherOpen' ? setIsTeacherOpen :
                               cat.isOpenKey === 'isOfficerOpen' ? setIsOfficerOpen :
-                              cat.isOpenKey === 'isReportOpen' ? setIsReportOpen : () => {};
+                              cat.isOpenKey === 'isReportOpen' ? setIsReportOpen :
+                              cat.isOpenKey === 'isManagementOpen' ? setIsManagementOpen : () => {};
 
             return (
               <div key={cat.category}>
@@ -838,6 +851,8 @@ export default function App() {
             classes={classes}
             jobTitles={jobTitles}
             students={students}
+            programs={programs}
+            currentUserStaff={currentUserStaff}
           />
         )}
         {activeTab.startsWith('report') && (
@@ -849,10 +864,12 @@ export default function App() {
             attendanceRecords={attendanceRecords}
             staff={staff}
             departments={departments}
+            programs={programs}
           />
         )}
-        {activeTab === 'management' && (
+        {activeTab.startsWith('management') && (
           <ManagementView 
+            subTab={activeTab === 'management' ? 'setting' : activeTab.split('-')[1] as any}
             campuses={campuses} 
             programs={programs} 
             jobTitles={jobTitles}
@@ -1883,8 +1900,7 @@ function TimetableTeacherView({ staff, sessions, classes, campuses, userEmail, s
 
       // Update session status
       await updateDoc(doc(db, 'sessions', activeSession.id), { 
-        attendanceStatus: 'Done',
-        status: 'Done' 
+        attendanceStatus: 'Done'
       });
 
       setIsMarkingOpen(false);
@@ -2189,6 +2205,7 @@ function StaffView({ staff, sessions, classes, campuses, jobTitles }: {
 // --- View: Management (Campuses & Programs) ---
 
 function ManagementView({ 
+  subTab,
   campuses, 
   programs, 
   jobTitles, 
@@ -2196,6 +2213,7 @@ function ManagementView({
   permissions,
   navStructure
 }: { 
+  subTab: 'setting' | 'permissions',
   campuses: Campus[], 
   programs: Program[], 
   jobTitles: JobTitle[], 
@@ -2365,9 +2383,13 @@ function ManagementView({
 
   return (
     <div className="max-w-4xl space-y-12 pb-20">
-      <h1 className="text-3xl font-serif italic pl-12">Management</h1>
+      <h1 className="text-3xl font-serif italic pl-12">
+        Management: {subTab === 'permissions' ? 'Permissions' : 'Setting'}
+      </h1>
 
-      {/* Campuses */}
+      {subTab === 'setting' && (
+        <>
+          {/* Campuses */}
       <section className="space-y-4">
         <h2 className="text-xl font-bold flex items-center gap-2">
           <LayoutDashboard size={20} className="text-emerald-600" />
@@ -2498,8 +2520,11 @@ function ManagementView({
         </div>
       </section>
 
-      {/* Permissions */}
-      <section className="space-y-4">
+        </>
+      )}
+
+      {subTab === 'permissions' && (
+        <section className="space-y-4">
         <h2 className="text-xl font-bold flex items-center gap-2">
           <Shield size={20} className="text-purple-600" />
           Page Permissions
@@ -2595,6 +2620,7 @@ function ManagementView({
           </div>
         </div>
       </section>
+      )}
     </div>
   );
 }
@@ -4901,8 +4927,7 @@ function AttendanceView({ classes, students, attendanceRecords, sessions }: {
     const sessionToday = sessions.find(s => s.classId === selectedClassId && safeFormat(s.startTime, 'yyyy-MM-dd') === selectedDate);
     if (sessionToday) {
       await updateDoc(doc(db, 'sessions', sessionToday.id), { 
-        attendanceStatus: 'Done',
-        status: 'Done' 
+        attendanceStatus: 'Done'
       });
     }
 
@@ -5093,6 +5118,350 @@ function AttendanceView({ classes, students, attendanceRecords, sessions }: {
   );
 }
 
+function WaitlistDashboard({ waitlist, staff, programs, consultants }: { 
+  waitlist: WaitlistEntry[], 
+  staff: Staff[], 
+  programs: Program[], 
+  consultants: Staff[] 
+}) {
+  const waitingStudents = useMemo(() => waitlist.filter(w => w.status === 'Waiting'), [waitlist]);
+  const totalWaiting = waitingStudents.length;
+  
+  // Breakdown by Source
+  const sourceData = useMemo(() => {
+    const counts: Record<string, number> = {};
+    waitingStudents.forEach(item => {
+      counts[item.source] = (counts[item.source] || 0) + 1;
+    });
+    return Object.entries(counts).map(([name, value]) => ({
+      name,
+      value,
+      percentage: totalWaiting > 0 ? ((value / totalWaiting) * 100).toFixed(1) : 0
+    }));
+  }, [waitingStudents, totalWaiting]);
+
+  // Breakdown by Consultant
+  const consultantData = useMemo(() => {
+    const counts: Record<string, number> = {};
+    waitingStudents.forEach(item => {
+      const name = staff.find(s => s.id === item.consultantId)?.name || 'Unknown';
+      counts[name] = (counts[name] || 0) + 1;
+    });
+    return Object.entries(counts).map(([name, value]) => ({
+      name,
+      value,
+      percentage: totalWaiting > 0 ? ((value / totalWaiting) * 100).toFixed(1) : 0
+    }));
+  }, [waitingStudents, totalWaiting, staff]);
+
+  // Breakdown by Program
+  const programData = useMemo(() => {
+    const counts: Record<string, number> = {};
+    waitingStudents.forEach(item => {
+      const name = programs.find(p => p.id === item.desiredProgramId)?.name || 'Unknown';
+      counts[name] = (counts[name] || 0) + 1;
+    });
+    return Object.entries(counts).map(([name, value]) => ({
+      name,
+      value,
+      percentage: totalWaiting > 0 ? ((value / totalWaiting) * 100).toFixed(1) : 0
+    }));
+  }, [waitingStudents, totalWaiting, programs]);
+
+  // Breakdown by Cycle
+  const cycleData = useMemo(() => {
+    const counts: Record<number, number> = { 1: 0, 2: 0, 3: 0 };
+    waitingStudents.forEach(item => {
+      counts[item.consultationCount] = (counts[item.consultationCount] || 0) + 1;
+    });
+    return Object.entries(counts).map(([name, value]) => ({
+      name: `Cycle ${name}/3`,
+      value
+    }));
+  }, [waitingStudents]);
+
+  // Success Rate Analysis
+  const successAnalysis = useMemo(() => {
+    const enrolled = waitlist.filter(w => w.status === 'Enrolled').length;
+    const failed = waitlist.filter(w => w.status === 'Failed').length;
+    const totalConcluded = enrolled + failed;
+    const overallRate = totalConcluded > 0 ? (enrolled / totalConcluded) * 100 : 0;
+
+    // By Consultant
+    const byConsultant = consultants.map(c => {
+      const cWaitlist = waitlist.filter(w => w.consultantId === c.id);
+      const cEnrolled = cWaitlist.filter(w => w.status === 'Enrolled').length;
+      const cFailed = cWaitlist.filter(w => w.status === 'Failed').length;
+      const cTotalConcluded = cEnrolled + cFailed;
+      const rate = cTotalConcluded > 0 ? (cEnrolled / cTotalConcluded) * 100 : 0;
+      return { name: c.name, rate: rate.toFixed(1), total: cTotalConcluded, enrolled: cEnrolled };
+    });
+
+    // Historical Trends (by month)
+    const monthlyData: Record<string, { enrolled: number, total: number }> = {};
+    waitlist.forEach(w => {
+      if (w.status === 'Waiting') return; // Only count concluded cases for success rate trend
+      const month = safeFormat(w.createdAt, 'MM/yyyy');
+      if (!monthlyData[month]) monthlyData[month] = { enrolled: 0, total: 0 };
+      monthlyData[month].total++;
+      if (w.status === 'Enrolled') monthlyData[month].enrolled++;
+    });
+
+    const trendData = Object.entries(monthlyData)
+      .map(([month, data]) => ({
+        month,
+        rate: Number(((data.enrolled / data.total) * 100).toFixed(1))
+      }))
+      .sort((a, b) => {
+        const [mA, yA] = a.month.split('/').map(Number);
+        const [mB, yB] = b.month.split('/').map(Number);
+        return yA !== yB ? yA - yB : mA - mB;
+      });
+
+    return { overallRate, byConsultant, trendData };
+  }, [waitlist, consultants]);
+
+  // Successful Consultations by Program (last 6 months)
+  const successByProgramTrend = useMemo(() => {
+    const last6Months = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = subMonths(new Date(), i);
+      last6Months.push(format(d, 'MM/yyyy'));
+    }
+
+    const data = last6Months.map(month => {
+      const entry: any = { month };
+      programs.forEach(p => {
+        const count = waitlist.filter(w => 
+          w.status === 'Enrolled' && 
+          w.desiredProgramId === p.id && 
+          safeFormat(w.createdAt, 'MM/yyyy') === month
+        ).length;
+        entry[p.name] = count;
+      });
+      return entry;
+    });
+
+    return data;
+  }, [waitlist, programs]);
+
+  const COLORS = ['#8884d8', '#82ca9d', '#ffc658', '#ff8042', '#0088FE', '#00C49F', '#FFBB28', '#FF8042'];
+
+  return (
+    <div className="space-y-8 animate-in fade-in duration-500">
+      {/* Top Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <div className="bg-white p-8 rounded-[40px] border border-black/5 shadow-sm">
+          <p className="text-[10px] uppercase font-bold text-black/40 mb-1">Total Waitlist</p>
+          <h3 className="text-4xl font-serif italic text-blue-600">{totalWaiting}</h3>
+          <p className="text-[10px] text-black/30 mt-2 italic">Students currently waiting</p>
+        </div>
+        <div className="bg-white p-8 rounded-[40px] border border-black/5 shadow-sm">
+          <p className="text-[10px] uppercase font-bold text-black/40 mb-1">Overall Success Rate</p>
+          <h3 className="text-4xl font-serif italic text-emerald-600">{successAnalysis.overallRate.toFixed(1)}%</h3>
+          <p className="text-[10px] text-black/30 mt-2 italic">Enrolled vs Total Consulted</p>
+        </div>
+        <div className="bg-white p-8 rounded-[40px] border border-black/5 shadow-sm">
+          <p className="text-[10px] uppercase font-bold text-black/40 mb-1">Active Consultations</p>
+          <h3 className="text-4xl font-serif italic text-amber-600">{waitingStudents.length}</h3>
+          <p className="text-[10px] text-black/30 mt-2 italic">Pending follow-up</p>
+        </div>
+        <div className="bg-white p-8 rounded-[40px] border border-black/5 shadow-sm">
+          <p className="text-[10px] uppercase font-bold text-black/40 mb-1">Failed Rate</p>
+          <h3 className="text-4xl font-serif italic text-red-600">
+            {waitlist.length > 0 ? ((waitlist.filter(w => w.status === 'Failed').length / waitlist.length) * 100).toFixed(1) : 0}%
+          </h3>
+          <p className="text-[10px] text-black/30 mt-2 italic">Lost opportunities</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Source Breakdown */}
+        <div className="bg-white p-8 rounded-[40px] border border-black/5 shadow-sm">
+          <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
+            <PieChartIcon size={20} className="text-purple-600" />
+            Breakdown by Source
+          </h3>
+          <div className="h-[300px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={sourceData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={80}
+                  paddingAngle={5}
+                  dataKey="value"
+                >
+                  {sourceData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip />
+                <Legend verticalAlign="bottom" height={36}/>
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="mt-6 space-y-2">
+            {sourceData.map((item, idx) => (
+              <div key={item.name} className="flex justify-between items-center text-sm">
+                <span className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
+                  {item.name}
+                </span>
+                <span className="font-bold">{item.value} ({item.percentage}%)</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Consultant Success Rate */}
+        <div className="bg-white p-8 rounded-[40px] border border-black/5 shadow-sm lg:col-span-2">
+          <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
+            <Users size={20} className="text-emerald-600" />
+            Consultant Performance
+          </h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-black/5">
+                  <th className="pb-4 text-[10px] uppercase font-bold text-black/40">Consultant</th>
+                  <th className="pb-4 text-[10px] uppercase font-bold text-black/40 text-center">Total Consulted</th>
+                  <th className="pb-4 text-[10px] uppercase font-bold text-black/40 text-center">Enrolled</th>
+                  <th className="pb-4 text-[10px] uppercase font-bold text-black/40 text-right">Success Rate</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-black/[0.02]">
+                {successAnalysis.byConsultant.map(c => (
+                  <tr key={c.name} className="hover:bg-black/[0.01]">
+                    <td className="py-4 font-bold text-sm">{c.name}</td>
+                    <td className="py-4 text-sm text-center font-mono">{c.total}</td>
+                    <td className="py-4 text-sm text-center font-mono text-emerald-600">{c.enrolled}</td>
+                    <td className="py-4 text-right">
+                      <div className="flex items-center justify-end gap-3">
+                        <div className="w-24 h-2 bg-black/5 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-emerald-500" 
+                            style={{ width: `${c.rate}%` }}
+                          />
+                        </div>
+                        <span className="text-sm font-bold w-12">{c.rate}%</span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Historical Trends */}
+        <div className="bg-white p-8 rounded-[40px] border border-black/5 shadow-sm lg:col-span-2">
+          <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
+            <TrendingUp size={20} className="text-indigo-600" />
+            Success Rate Trends (Monthly)
+          </h3>
+          <div className="h-[300px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={successAnalysis.trendData}>
+                <defs>
+                  <linearGradient id="colorRate" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10 }} unit="%" />
+                <Tooltip />
+                <Area type="monotone" dataKey="rate" stroke="#6366f1" fillOpacity={1} fill="url(#colorRate)" strokeWidth={3} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Cycle Breakdown */}
+        <div className="bg-white p-8 rounded-[40px] border border-black/5 shadow-sm lg:col-span-2">
+          <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
+            <RefreshCw size={20} className="text-amber-600" />
+            Waitlist by Consultation Cycle
+          </h3>
+          <div className="grid grid-cols-3 gap-6">
+            {cycleData.map((item, idx) => (
+              <div key={item.name} className="relative p-8 bg-black/[0.02] rounded-[40px] overflow-hidden group">
+                <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
+                  <RefreshCw size={64} />
+                </div>
+                <p className="text-[10px] uppercase font-bold text-black/40 mb-2">{item.name}</p>
+                <h4 className="text-4xl font-serif italic">{item.value}</h4>
+                <p className="text-[10px] text-black/30 mt-2">Students in this stage</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Program Breakdown */}
+        <div className="bg-white p-8 rounded-[40px] border border-black/5 shadow-sm lg:col-span-2">
+          <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
+            <Target size={20} className="text-blue-600" />
+            Waitlist by Program
+          </h3>
+          <div className="h-[300px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={programData}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
+                <Tooltip cursor={{ fill: 'transparent' }} />
+                <Bar dataKey="value" fill="#3b82f6" radius={[10, 10, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
+            {programData.map(item => (
+              <div key={item.name} className="p-4 bg-black/[0.02] rounded-2xl">
+                <p className="text-[10px] uppercase font-bold text-black/40">{item.name}</p>
+                <p className="text-lg font-bold">{item.value} <span className="text-xs font-normal text-black/40">({item.percentage}%)</span></p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Successful Consultations Trend by Program */}
+        <div className="bg-white p-8 rounded-[40px] border border-black/5 shadow-sm lg:col-span-2">
+          <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
+            <TrendingUp size={20} className="text-emerald-600" />
+            Successful Consultations by Program (Last 6 Months)
+          </h3>
+          <div className="h-[400px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={successByProgramTrend}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
+                <Tooltip />
+                <Legend />
+                {programs.map((p, idx) => (
+                  <Line 
+                    key={p.id} 
+                    type="monotone" 
+                    dataKey={p.name} 
+                    stroke={COLORS[idx % COLORS.length]} 
+                    strokeWidth={3} 
+                    dot={{ r: 4 }} 
+                    activeDot={{ r: 6 }}
+                  />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // --- View: Officer ---
 
 function OfficerView({
@@ -5101,21 +5470,37 @@ function OfficerView({
   staff,
   classes,
   jobTitles,
-  students
+  students,
+  programs,
+  currentUserStaff
 }: {
-  subTab: 'waitlist',
+  subTab: 'waitlist' | 'waitlistall' | 'dashboard',
   waitlist: WaitlistEntry[],
   staff: Staff[],
   classes: Class[],
   jobTitles: JobTitle[],
-  students: Student[]
+  students: Student[],
+  programs: Program[],
+  currentUserStaff: Staff | null
 }) {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingWaitlist, setEditingWaitlist] = useState<WaitlistEntry | null>(null);
   const [enrollingWaitlist, setEnrollingWaitlist] = useState<WaitlistEntry | null>(null);
-  const [filterCycle, setFilterCycle] = useState<string>('all');
-  const [filterConsultantId, setFilterConsultantId] = useState<string>('all');
-  const [filterClassId, setFilterClassId] = useState<string>('all');
+  const [filterMonth, setFilterMonth] = useState<string>('all');
+  const [filterConsultationCycle, setFilterConsultationCycle] = useState<string>('all');
+  const [filterStatus, setFilterStatus] = useState<string>('Waiting');
+  const [filterConsultantId, setFilterConsultantId] = useState<string>(
+    subTab === 'waitlist' && currentUserStaff ? currentUserStaff.id : 'all'
+  );
+  const [filterProgramId, setFilterProgramId] = useState<string>('all');
+
+  useEffect(() => {
+    if (subTab === 'waitlist' && currentUserStaff) {
+      setFilterConsultantId(currentUserStaff.id);
+    } else if (subTab === 'waitlistall') {
+      setFilterStatus('Waiting');
+    }
+  }, [subTab, currentUserStaff]);
 
   // For Enrollment Form
   const [enrollData, setEnrollData] = useState<Partial<Student>>({});
@@ -5124,8 +5509,8 @@ function OfficerView({
   const consultantJobTitle = jobTitles.find(jt => jt.name.toLowerCase().includes('consultant'));
   const consultants = staff.filter(s => s.jobTitleIds?.includes(consultantJobTitle?.id || ''));
 
-  // Derive available cycles from waitlist
-  const cycles = useMemo(() => {
+  // Derive available months from waitlist
+  const availableMonths = useMemo(() => {
     const set = new Set<string>();
     waitlist.forEach(item => {
       if (item.createdAt) {
@@ -5147,6 +5532,7 @@ function OfficerView({
       phone: formData.get('phone') as string,
       source: formData.get('source') as any,
       consultantId: formData.get('consultantId') as string,
+      desiredProgramId: formData.get('desiredProgramId') as string,
       desiredClassId: (formData.get('desiredClassId') as string) || null,
       referrerStaffId: (formData.get('referrerStaffId') as string) || null,
       notes: formData.get('notes') as string
@@ -5222,46 +5608,109 @@ function OfficerView({
     }
   };
 
-  const filteredWaitlist = waitlist
-    .filter(item => item.status === 'Waiting')
-    .filter(item => filterConsultantId === 'all' || item.consultantId === filterConsultantId)
-    .filter(item => filterClassId === 'all' || item.desiredClassId === filterClassId)
-    .filter(item => filterCycle === 'all' || safeFormat(item.createdAt, 'MM/yyyy') === filterCycle)
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const filteredWaitlist = useMemo(() => {
+    let list = waitlist;
+    if (subTab === 'waitlist') {
+      list = list.filter(item => item.status === 'Waiting');
+    } else if (subTab === 'waitlistall') {
+      if (filterStatus !== 'all') {
+        list = list.filter(item => item.status === filterStatus);
+      }
+    }
+    if (filterConsultantId !== 'all') list = list.filter(e => e.consultantId === filterConsultantId);
+    if (filterProgramId !== 'all') list = list.filter(e => e.desiredProgramId === filterProgramId);
+    if (filterMonth !== 'all') {
+      list = list.filter(e => safeFormat(e.createdAt, 'MM/yyyy') === filterMonth);
+    }
+    if (subTab === 'waitlist' && filterConsultationCycle !== 'all') {
+      list = list.filter(e => e.consultationCount === Number(filterConsultationCycle));
+    }
+    // Sort by Date Added (oldest first)
+    return list.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  }, [waitlist, filterConsultantId, filterProgramId, filterMonth, filterConsultationCycle, subTab, filterStatus]);
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between pl-12">
-        <h1 className="text-3xl font-serif italic">Officer: Waitlist</h1>
-        <Button 
-          onClick={() => setIsAddModalOpen(true)}
-          className="bg-emerald-600 text-white hover:bg-emerald-700 rounded-2xl px-6"
-        >
-          Add Potential Student
-        </Button>
+        <div className="flex items-center gap-4">
+          <h1 className="text-3xl font-serif italic">
+            Officer: {subTab === 'dashboard' ? 'Dashboard' : subTab === 'waitlistall' ? 'Waitlist All' : 'Waitlist'}
+          </h1>
+        </div>
+        {subTab === 'waitlist' && (
+          <Button 
+            onClick={() => setIsAddModalOpen(true)}
+            className="bg-emerald-600 text-white hover:bg-emerald-700 rounded-2xl px-6"
+          >
+            <Plus size={16} className="mr-2" />
+            Add Potential Student
+          </Button>
+        )}
       </div>
 
-      {/* Filters */}
+      {subTab === 'dashboard' ? (
+        <WaitlistDashboard 
+          waitlist={waitlist} 
+          staff={staff} 
+          programs={programs} 
+          consultants={consultants}
+        />
+      ) : (
+        <>
+          {/* Filters */}
       <div className="flex flex-wrap gap-4 bg-white p-6 rounded-[32px] border border-black/5 shadow-sm">
-        <div className="flex-1 min-w-[200px]">
-          <label className="text-[10px] uppercase font-bold text-black/40 mb-2 block">Filter by Cycle</label>
+        <div className="flex-1 min-w-[150px]">
+          <label className="text-[10px] uppercase font-bold text-black/40 mb-2 block">Filter by Month</label>
           <select 
-            value={filterCycle} 
-            onChange={(e) => setFilterCycle(e.target.value)}
+            value={filterMonth} 
+            onChange={(e) => setFilterMonth(e.target.value)}
             className="w-full bg-black/[0.02] border-none rounded-xl text-sm p-3"
           >
-            <option value="all">All Cycles</option>
-            {cycles.map(c => (
+            <option value="all">All Months</option>
+            {availableMonths.map(c => (
               <option key={c} value={c}>{c}</option>
             ))}
           </select>
         </div>
+        {subTab === 'waitlist' ? (
+          <div className="flex-1 min-w-[150px]">
+            <label className="text-[10px] uppercase font-bold text-black/40 mb-2 block">Filter by Cycle</label>
+            <select 
+              value={filterConsultationCycle} 
+              onChange={(e) => setFilterConsultationCycle(e.target.value)}
+              className="w-full bg-black/[0.02] border-none rounded-xl text-sm p-3"
+            >
+              <option value="all">All Cycles</option>
+              <option value="1">Cycle 1/3</option>
+              <option value="2">Cycle 2/3</option>
+              <option value="3">Cycle 3/3</option>
+            </select>
+          </div>
+        ) : (
+          <div className="flex-1 min-w-[150px]">
+            <label className="text-[10px] uppercase font-bold text-black/40 mb-2 block">Status</label>
+            <select 
+              value={filterStatus} 
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className="w-full bg-black/[0.02] border-none rounded-xl text-sm p-3"
+            >
+              <option value="all">All Status</option>
+              <option value="Waiting">Waiting</option>
+              <option value="Enrolled">Enrolled</option>
+              <option value="Failed">Failed</option>
+            </select>
+          </div>
+        )}
         <div className="flex-1 min-w-[200px]">
           <label className="text-[10px] uppercase font-bold text-black/40 mb-2 block">Consultant</label>
           <select 
             value={filterConsultantId} 
             onChange={(e) => setFilterConsultantId(e.target.value)}
-            className="w-full bg-black/[0.02] border-none rounded-xl text-sm p-3"
+            disabled={subTab === 'waitlist' && !!currentUserStaff}
+            className={cn(
+              "w-full bg-black/[0.02] border-none rounded-xl text-sm p-3",
+              subTab === 'waitlist' && currentUserStaff && "opacity-50 cursor-not-allowed"
+            )}
           >
             <option value="all">All Consultants</option>
             {consultants.map(c => (
@@ -5270,15 +5719,15 @@ function OfficerView({
           </select>
         </div>
         <div className="flex-1 min-w-[200px]">
-          <label className="text-[10px] uppercase font-bold text-black/40 mb-2 block">Desired Class</label>
+          <label className="text-[10px] uppercase font-bold text-black/40 mb-2 block">Desired Program</label>
           <select 
-            value={filterClassId} 
-            onChange={(e) => setFilterClassId(e.target.value)}
+            value={filterProgramId} 
+            onChange={(e) => setFilterProgramId(e.target.value)}
             className="w-full bg-black/[0.02] border-none rounded-xl text-sm p-3"
           >
-            <option value="all">All Classes</option>
-            {classes.filter(c => c.status === 'Active').map(c => (
-              <option key={c.id} value={c.id}>{c.name}</option>
+            <option value="all">All Programs</option>
+            {programs.map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
             ))}
           </select>
         </div>
@@ -5290,10 +5739,12 @@ function OfficerView({
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-black/5">
+                <th className="p-6 text-[10px] uppercase font-bold text-black/40">Date Added</th>
                 <th className="p-6 text-[10px] uppercase font-bold text-black/40">Student Info</th>
                 <th className="p-6 text-[10px] uppercase font-bold text-black/40">Phone Number</th>
                 <th className="p-6 text-[10px] uppercase font-bold text-black/40">Source / Referrer</th>
                 <th className="p-6 text-[10px] uppercase font-bold text-black/40">Consultant</th>
+                <th className="p-6 text-[10px] uppercase font-bold text-black/40">Desired Program</th>
                 <th className="p-6 text-[10px] uppercase font-bold text-black/40">Desired Class</th>
                 <th className="p-6 text-[10px] uppercase font-bold text-black/40">Status (Cycle)</th>
                 <th className="p-6 text-[10px] uppercase font-bold text-black/40">Actions</th>
@@ -5302,11 +5753,14 @@ function OfficerView({
             <tbody className="divide-y divide-black/[0.02]">
               {filteredWaitlist.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-12 text-center text-black/40 font-serif italic">No students in waitlist</td>
+                  <td colSpan={9} className="p-12 text-center text-black/40 font-serif italic">No students in waitlist</td>
                 </tr>
               ) : (
                 filteredWaitlist.map(entry => (
                   <tr key={entry.id} className="hover:bg-black/[0.01] transition-colors">
+                    <td className="p-6">
+                      <p className="text-xs font-mono text-black/40">{safeFormat(entry.createdAt, 'dd/MM/yyyy')}</p>
+                    </td>
                     <td className="p-6">
                       <p className="font-bold text-sm">{entry.name}</p>
                       <p className="text-[10px] text-black/30 font-mono">ID: {entry.id.substring(0, 6).toUpperCase()}</p>
@@ -5334,6 +5788,9 @@ function OfficerView({
                     </td>
                     <td className="p-6">
                       <p className="text-sm font-medium">{staff.find(s => s.id === entry.consultantId)?.name}</p>
+                    </td>
+                    <td className="p-6">
+                      <p className="text-sm font-bold text-purple-600">{programs.find(p => p.id === entry.desiredProgramId)?.name || 'N/A'}</p>
                     </td>
                     <td className="p-6">
                       <p className="text-sm">{classes.find(c => c.id === entry.desiredClassId)?.name || 'Not specified'}</p>
@@ -5372,31 +5829,35 @@ function OfficerView({
                         >
                           Enroll
                         </button>
-                        <button 
-                          onClick={() => {
-                            setEditingWaitlist(entry);
-                            setIsAddModalOpen(true);
-                          }}
-                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-xl transition-colors"
-                          title="Edit"
-                        >
-                          <Settings size={14} />
-                        </button>
-                        <button 
-                          onClick={() => handleUpdateConsultation(entry.id, entry.consultationCount)}
-                          disabled={entry.consultationCount >= 3}
-                          className="p-2 text-amber-600 hover:bg-amber-50 rounded-xl transition-colors disabled:opacity-30"
-                          title="Next Consultation Cycle"
-                        >
-                          <RefreshCw size={14} />
-                        </button>
-                        <button 
-                          onClick={() => handleMarkFailed(entry.id)}
-                          className="p-2 text-red-600 hover:bg-red-50 rounded-xl transition-colors"
-                          title="Mark Failed"
-                        >
-                          <X size={14} />
-                        </button>
+                        {subTab === 'waitlist' && (
+                          <>
+                            <button 
+                              onClick={() => {
+                                setEditingWaitlist(entry);
+                                setIsAddModalOpen(true);
+                              }}
+                              className="p-2 text-blue-600 hover:bg-blue-50 rounded-xl transition-colors"
+                              title="Edit"
+                            >
+                              <Settings size={14} />
+                            </button>
+                            <button 
+                              onClick={() => handleUpdateConsultation(entry.id, entry.consultationCount)}
+                              disabled={entry.consultationCount >= 3}
+                              className="p-2 text-amber-600 hover:bg-amber-50 rounded-xl transition-colors disabled:opacity-30"
+                              title="Next Consultation Cycle"
+                            >
+                              <RefreshCw size={14} />
+                            </button>
+                            <button 
+                              onClick={() => handleMarkFailed(entry.id)}
+                              className="p-2 text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+                              title="Mark Failed"
+                            >
+                              <X size={14} />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -5406,6 +5867,8 @@ function OfficerView({
           </table>
         </div>
       </div>
+      </>
+      )}
 
       {/* Add/Edit Modal */}
       {isAddModalOpen && (
@@ -5441,16 +5904,35 @@ function OfficerView({
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] uppercase font-bold text-black/40">Consultant (Mandatory)</label>
-                  <select name="consultantId" required defaultValue={editingWaitlist?.consultantId} className="w-full bg-black/[0.02] border-none rounded-2xl p-4 text-sm">
-                    <option value="">Select Consultant</option>
+                  <select 
+                    name="consultantId" 
+                    required 
+                    defaultValue={editingWaitlist?.consultantId || currentUserStaff?.id || ''} 
+                    disabled={!!currentUserStaff}
+                    className={cn(
+                      "w-full bg-black/[0.02] border-none rounded-2xl p-4 text-sm",
+                      currentUserStaff && "opacity-50 cursor-not-allowed"
+                    )}
+                  >
+                    {!currentUserStaff && <option value="">Select Consultant</option>}
                     {consultants.map(c => (
                       <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
                   </select>
+                  {currentUserStaff && <input type="hidden" name="consultantId" value={currentUserStaff.id} />}
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase font-bold text-black/40">Desired Program (Mandatory)</label>
+                  <select name="desiredProgramId" required defaultValue={editingWaitlist?.desiredProgramId || ''} className="w-full bg-black/[0.02] border-none rounded-2xl p-4 text-sm">
+                    <option value="">Select Program</option>
+                    {programs.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
                 <div className="space-y-2">
                   <label className="text-[10px] uppercase font-bold text-black/40">Desired Class (Optional)</label>
                   <select name="desiredClassId" defaultValue={editingWaitlist?.desiredClassId || ''} className="w-full bg-black/[0.02] border-none rounded-2xl p-4 text-sm">
@@ -5460,6 +5942,9 @@ function OfficerView({
                     ))}
                   </select>
                 </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <label className="text-[10px] uppercase font-bold text-black/40">Referrer (Optional)</label>
                   <select name="referrerStaffId" defaultValue={editingWaitlist?.referrerStaffId || ''} className="w-full bg-black/[0.02] border-none rounded-2xl p-4 text-sm">
@@ -5638,7 +6123,8 @@ function ReportView({
   tuitionRecords, 
   attendanceRecords,
   staff,
-  departments
+  departments,
+  programs
 }: { 
   subTab: 'overview' | 'students' | 'revenue',
   students: Student[],
@@ -5646,16 +6132,19 @@ function ReportView({
   tuitionRecords: TuitionRecord[],
   attendanceRecords: AttendanceRecord[],
   staff: Staff[],
-  departments: Department[]
+  departments: Department[],
+  programs: Program[]
 }) {
   const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
   // Data for Overview: Student Status
   const studentStatusData = useMemo(() => {
-    const counts = students.reduce((acc, s) => {
-      acc[s.status] = (acc[s.status] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
+    const counts = students
+      .filter(s => s.status !== 'Done')
+      .reduce((acc, s) => {
+        acc[s.status] = (acc[s.status] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
     return Object.entries(counts).map(([name, value]) => ({ name, value }));
   }, [students]);
 
@@ -5711,9 +6200,11 @@ function ReportView({
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <div className="bg-white p-6 rounded-[32px] border border-black/5 shadow-sm">
               <p className="text-[10px] uppercase font-bold text-black/40 mb-1">Total Students</p>
-              <p className="text-3xl font-serif italic">{students.length}</p>
-              <p className="text-xs text-emerald-600 mt-2 font-medium">
+              <p className="text-3xl font-serif italic text-emerald-600">
                 {students.filter(s => s.status === 'Study').length} Active
+              </p>
+              <p className="text-xs text-black/40 mt-2 font-medium">
+                {students.length} Total Students
               </p>
             </div>
             <div className="bg-white p-6 rounded-[32px] border border-black/5 shadow-sm">
@@ -5778,7 +6269,7 @@ function ReportView({
               <h3 className="text-lg font-bold mb-6">Student Status Distribution</h3>
               <div className="flex-1 flex items-center">
                 <ResponsiveContainer width="100%" height="100%">
-                  <RePieChart>
+                  <PieChart>
                     <Pie
                       data={studentStatusData}
                       cx="50%"
@@ -5796,7 +6287,7 @@ function ReportView({
                       contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}}
                     />
                     <Legend verticalAlign="bottom" height={36}/>
-                  </RePieChart>
+                  </PieChart>
                 </ResponsiveContainer>
               </div>
             </div>
@@ -5807,7 +6298,7 @@ function ReportView({
             <h3 className="text-lg font-bold mb-6">Top 10 Classes by Attendance Rate (%)</h3>
             <div className="flex-1">
               <ResponsiveContainer width="100%" height="100%">
-                <ReBarChart data={attendanceData} layout="vertical">
+                <BarChart data={attendanceData} layout="vertical">
                   <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#00000005" />
                   <XAxis type="number" domain={[0, 100]} hide />
                   <YAxis 
@@ -5823,7 +6314,7 @@ function ReportView({
                     formatter={(value: number) => [value + '%', 'Attendance Rate']}
                   />
                   <Bar dataKey="rate" fill="#3b82f6" radius={[0, 10, 10, 0]} barSize={20} />
-                </ReBarChart>
+                </BarChart>
               </ResponsiveContainer>
             </div>
           </div>
@@ -5846,7 +6337,7 @@ function ReportView({
                       <div className="flex items-center gap-4">
                         <span className="text-2xl font-serif italic">{item.value}</span>
                         <span className="text-xs text-black/40 font-medium">
-                          ({Math.round((item.value / students.length) * 100)}%)
+                          ({Math.round((item.value / students.filter(s => s.status !== 'Done').length) * 100)}%)
                         </span>
                       </div>
                     </div>
@@ -5854,6 +6345,36 @@ function ReportView({
                 </div>
              </div>
 
+             {/* Active Students by Program */}
+             <div className="bg-white p-8 rounded-[40px] border border-black/5 shadow-sm">
+                <h3 className="text-lg font-bold mb-6">Active Students by Program</h3>
+                <div className="h-[250px] w-full mb-6">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={programs.map(p => ({
+                      name: p.name,
+                      count: students.filter(s => s.status === 'Study' && s.classIds.some(cid => classes.find(c => c.id === cid)?.programId === p.id)).length
+                    })).filter(p => p.count > 0)}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#00000005" />
+                      <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 10}} />
+                      <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10}} />
+                      <Tooltip />
+                      <Bar dataKey="count" fill="#10b981" radius={[10, 10, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  {programs.map(p => {
+                    const count = students.filter(s => s.status === 'Study' && s.classIds.some(cid => classes.find(c => c.id === cid)?.programId === p.id)).length;
+                    if (count === 0) return null;
+                    return (
+                      <div key={p.id} className="p-4 bg-black/[0.02] rounded-2xl">
+                        <p className="text-[10px] uppercase font-bold text-black/40">{p.name}</p>
+                        <p className="text-xl font-bold">{count}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+             </div>
              {/* Growth / Enrollment (Mocked trend based on ID order or similar if no date) */}
              <div className="bg-white p-8 rounded-[40px] border border-black/5 shadow-sm flex flex-col">
                 <h3 className="text-lg font-bold mb-6">Enrollment Overview</h3>

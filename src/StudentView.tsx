@@ -72,7 +72,7 @@ export function StudentView({ subTab, students, classes }: {
         'Nickname': s.nickname || '',
         'Status': s.status,
         'Gender': s.gender || '',
-        'Birth Year': s.birthYear || '',
+        'Date of Birth': s.dob || '',
         'Phone': s.phone || '',
         'Classes': s.classIds.map(id => classes.find(c => c.id === id)?.name).join(', '),
         'Email': s.email || '',
@@ -104,9 +104,8 @@ export function StudentView({ subTab, students, classes }: {
       const batch = writeBatch(db);
       
       for (const row of jsonData) {
-        const birthYearVal = getValue(row, ['Birth Year', 'Năm sinh', 'Ngày sinh']);
-        const normalizedBirthDate = normalizeImportDate(birthYearVal);
-        const birthYear = normalizedBirthDate ? parseInt(normalizedBirthDate.substring(0, 4)) : 0;
+        const dobVal = getValue(row, ['Date of Birth', 'Ngày sinh', 'Birth Date', 'DOB']);
+        const normalizedDob = normalizeImportDate(dobVal);
 
         const studentData: any = {
           studentId: getValue(row, ['Student ID', 'Mã học viên']) || '',
@@ -114,7 +113,7 @@ export function StudentView({ subTab, students, classes }: {
           nickname: getValue(row, ['Nickname', 'Tên gọi khác']) || '',
           status: getValue(row, ['Status', 'Trạng thái']) || 'Pending',
           gender: getValue(row, ['Gender', 'Giới tính']) || 'Male',
-          birthYear: birthYear || Number(birthYearVal) || 0,
+          dob: normalizedDob || '',
           phone: getValue(row, ['Phone', 'Số điện thoại']) || '',
           classIds: getValue(row, ['Classes', 'Lớp học']) ? String(getValue(row, ['Classes', 'Lớp học'])).split(',').map((n: string) => classes.find(c => c.name === n.trim())?.id).filter((id: any) => id) : [],
           email: getValue(row, ['Email']) || '',
@@ -163,7 +162,7 @@ export function StudentView({ subTab, students, classes }: {
       nickname: editingStudent.nickname || '',
       status,
       gender: editingStudent.gender || 'Male',
-      birthYear: Number(editingStudent.birthYear) || 0,
+      dob: editingStudent.dob || '',
       phone: editingStudent.phone || '',
       classIds,
       email: editingStudent.email || '',
@@ -391,8 +390,8 @@ export function StudentView({ subTab, students, classes }: {
 
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1">
-                          <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Birth Year</label>
-                          <Input type="number" value={editingStudent?.birthYear || ''} onChange={e => setEditingStudent({...editingStudent, birthYear: Number(e.target.value)})} />
+                          <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Date of Birth</label>
+                          <Input type="date" value={editingStudent?.dob || ''} onChange={e => setEditingStudent({...editingStudent, dob: e.target.value})} />
                         </div>
                         <div className="space-y-1">
                           <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Phone</label>
