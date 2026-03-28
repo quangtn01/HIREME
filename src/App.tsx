@@ -993,9 +993,11 @@ function SessionModal({ isOpen, onClose, editingSession, setEditingSession, camp
 
   return (
     <div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center p-6 z-50">
-      <div className="bg-white w-full max-w-lg rounded-[32px] p-8 shadow-2xl border border-black/5">
-        <h2 className="text-2xl font-serif italic mb-6">{editingSession?.id ? 'Edit Session' : 'New Session'}</h2>
-        <form onSubmit={handleSave} className="space-y-4">
+      <div className="bg-white w-full max-w-lg rounded-[32px] shadow-2xl border border-black/5 flex flex-col max-h-[95vh] overflow-hidden">
+        <div className="p-8 pb-4 shrink-0">
+          <h2 className="text-2xl font-serif italic">{editingSession?.id ? 'Edit Session' : 'New Session'}</h2>
+        </div>
+        <form onSubmit={handleSave} className="space-y-4 overflow-y-auto p-8 pt-0">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1">
               <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Class</label>
@@ -5001,12 +5003,12 @@ function TuitionView({ classes, students, tuitionRecords }: { classes: Class[], 
       {/* Notification Modal */}
       {showNotificationModal && selectedStudentForAction && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/20 backdrop-blur-sm">
-          <div className="bg-white rounded-[32px] shadow-2xl border border-black/5 w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="p-6 border-b border-black/5 bg-blue-50/50">
+          <div className="bg-white rounded-[32px] shadow-2xl border border-black/5 w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[95vh]">
+            <div className="p-6 border-b border-black/5 bg-blue-50/50 shrink-0">
               <h2 className="text-xl font-bold text-blue-900">Thông báo học phí</h2>
               <p className="text-xs text-blue-600/60 font-medium">Trung Tâm Ngoại Ngữ Hireme</p>
             </div>
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4 overflow-y-auto">
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-[9px] uppercase font-bold text-black/30 tracking-widest block mb-0.5">Học viên</label>
@@ -5029,7 +5031,7 @@ function TuitionView({ classes, students, tuitionRecords }: { classes: Class[], 
                   const currentOwed = currentMonthRecord?.owedAmount || 0;
                   const total = currentOwed + previousDebt;
                   const transferContent = `${selectedStudentForAction.name} - ${selectedClass?.name}`;
-                  const qrUrl = `https://img.vietqr.io/image/vietcombank-0081001333974-compact.png?amount=${total}&addInfo=${encodeURIComponent(transferContent)}&accountName=Trung%20Tam%20Ngoai%20Ngu%20Hireme`;
+                  const qrUrl = `https://img.vietqr.io/image/vietcombank-0081001333974-compact.png?amount=${total}&addInfo=${encodeURIComponent(transferContent)}&accountName=CT%20TNHH%20DAO%20TAO%20TIENG%20ANH%20HIREME`;
 
                   return (
                     <>
@@ -5051,7 +5053,7 @@ function TuitionView({ classes, students, tuitionRecords }: { classes: Class[], 
                         <div className="text-center space-y-1">
                           <p className="text-[9px] uppercase font-bold text-black/30 tracking-widest">Thông tin chuyển khoản</p>
                           <p className="text-sm font-bold text-blue-900">Vietcombank: 0081001333974</p>
-                          <p className="text-[10px] text-black/60 uppercase font-medium">Trung Tâm Ngoại Ngữ Hireme</p>
+                          <p className="text-[10px] text-black/60 uppercase font-medium">CT TNHH DAO TAO TIENG ANH HIREME</p>
                           <p className="text-xs bg-blue-50 text-blue-700 py-1.5 px-3 rounded-lg font-mono inline-block">
                             Nội dung: {transferContent}
                           </p>
@@ -5070,7 +5072,7 @@ function TuitionView({ classes, students, tuitionRecords }: { classes: Class[], 
                 })()}
               </div>
             </div>
-            <div className="p-6 border-t border-black/5">
+            <div className="p-6 border-t border-black/5 shrink-0">
               <Button onClick={() => setShowNotificationModal(false)} className="w-full bg-black text-white hover:bg-black/80 h-10 rounded-xl">Đóng</Button>
             </div>
           </div>
@@ -6215,14 +6217,14 @@ function OfficerView({
       {/* Add/Edit Modal */}
       {isAddModalOpen && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
-          <div className="bg-white rounded-[40px] w-full max-w-lg overflow-hidden shadow-2xl">
-            <div className="p-8 border-b border-black/5 flex items-center justify-between">
+          <div className="bg-white rounded-[40px] w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[95vh]">
+            <div className="p-8 border-b border-black/5 flex items-center justify-between shrink-0">
               <h2 className="text-2xl font-serif italic">{editingWaitlist ? 'Edit Potential Student' : 'Add Potential Student'}</h2>
               <button onClick={() => { setIsAddModalOpen(false); setEditingWaitlist(null); }} className="p-2 hover:bg-black/5 rounded-full">
                 <X size={20} />
               </button>
             </div>
-            <form onSubmit={handleSaveWaitlist} className="p-8 space-y-6">
+            <form onSubmit={handleSaveWaitlist} className="p-8 space-y-6 overflow-y-auto">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <label className="text-[10px] uppercase font-bold text-black/40">Full Name</label>
