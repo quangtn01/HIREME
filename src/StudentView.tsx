@@ -9,8 +9,8 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import * as XLSX from 'xlsx';
-import { Student, Class } from './types';
-import { normalizeImportDate, getValue } from './App';
+import { Student, Class, WaitlistEntry } from './types';
+import { normalizeImportDate, getValue, handleFirestoreError, OperationType } from './App';
 import { 
   Plus, 
   Trash2, 
@@ -136,9 +136,13 @@ export function StudentView({ subTab, students, classes }: {
         }
       }
 
-      await batch.commit();
-      alert("Import complete!");
-      e.target.value = '';
+      try {
+        await batch.commit();
+        alert("Import complete!");
+        e.target.value = '';
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, 'students');
+      }
     };
     reader.readAsArrayBuffer(file);
   };
@@ -170,13 +174,17 @@ export function StudentView({ subTab, students, classes }: {
       note: editingStudent.note || ''
     };
 
-    if (editingStudent.id) {
-      await updateDoc(doc(db, 'students', editingStudent.id), data);
-    } else {
-      await addDoc(collection(db, 'students'), data);
+    try {
+      if (editingStudent.id) {
+        await updateDoc(doc(db, 'students', editingStudent.id), data);
+      } else {
+        await addDoc(collection(db, 'students'), data);
+      }
+      setEditingStudent(null);
+      setIsFormOpen(false);
+    } catch (err) {
+      handleFirestoreError(err, editingStudent.id ? OperationType.UPDATE : OperationType.CREATE, 'students');
     }
-    setEditingStudent(null);
-    setIsFormOpen(false);
   };
 
   const deleteStudent = async () => {
@@ -185,10 +193,14 @@ export function StudentView({ subTab, students, classes }: {
       setConfirmDelete(true);
       return;
     }
-    await deleteDoc(doc(db, 'students', editingStudent.id));
-    setEditingStudent(null);
-    setIsFormOpen(false);
-    setConfirmDelete(false);
+    try {
+      await deleteDoc(doc(db, 'students', editingStudent.id));
+      setEditingStudent(null);
+      setIsFormOpen(false);
+      setConfirmDelete(false);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, 'students');
+    }
   };
 
   const filteredStudents = students.filter(s => {

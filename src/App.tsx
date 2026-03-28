@@ -24,7 +24,7 @@ import {
 } from 'firebase/auth';
 import { db, auth } from './firebase';
 import * as XLSX from 'xlsx';
-import { Campus, Staff, Class, Session, Program, ScheduleItem, JobTitle, Department, LeaveUsage, Student, TuitionRecord, AttendanceRecord, Permission } from './types';
+import { Campus, Staff, Class, Session, Program, ScheduleItem, JobTitle, Department, LeaveUsage, Student, TuitionRecord, AttendanceRecord, Permission, WaitlistEntry } from './types';
 import { StudentView } from './StudentView';
 import { 
   LayoutDashboard, 
@@ -50,6 +50,7 @@ import {
   Upload,
   Check,
   X,
+  RefreshCw,
   Edit2,
   Menu,
   Search,
@@ -71,6 +72,57 @@ function cn(...inputs: ClassValue[]) {
 }
 
 const VIETNAM_TZ = 'Asia/Ho_Chi_Minh';
+
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 const safeFormat = (dateStr: any, formatStr: string = 'dd/MM/yyyy', fallback: string = '-') => {
   if (!dateStr) return fallback;
@@ -370,6 +422,14 @@ const NAV_STRUCTURE = [
     ]
   },
   {
+    category: 'Officer',
+    icon: <Briefcase size={18} />,
+    isOpenKey: 'isOfficerOpen',
+    pages: [
+      { id: 'officer-waitlist', label: 'Waitlist', icon: <Users size={16} /> },
+    ]
+  },
+  {
     category: 'Report',
     icon: <BarChart3 size={18} />,
     isOpenKey: 'isReportOpen',
@@ -396,6 +456,7 @@ export default function App() {
   const [isCourseOpen, setIsCourseOpen] = useState(false);
   const [isStudentOpen, setIsStudentOpen] = useState(false);
   const [isTeacherOpen, setIsTeacherOpen] = useState(false);
+  const [isOfficerOpen, setIsOfficerOpen] = useState(false);
   const [isReportOpen, setIsReportOpen] = useState(false);
   const [campuses, setCampuses] = useState<Campus[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
@@ -408,6 +469,7 @@ export default function App() {
   const [leaveUsage, setLeaveUsage] = useState<LeaveUsage[]>([]);
   const [tuitionRecords, setTuitionRecords] = useState<TuitionRecord[]>([]);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
+  const [waitlist, setWaitlist] = useState<WaitlistEntry[]>([]);
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -417,6 +479,7 @@ export default function App() {
     if (activeTab.startsWith('course')) setIsCourseOpen(true);
     if (activeTab.startsWith('student')) setIsStudentOpen(true);
     if (activeTab.startsWith('teacher')) setIsTeacherOpen(true);
+    if (activeTab.startsWith('officer')) setIsOfficerOpen(true);
     if (activeTab.startsWith('report')) setIsReportOpen(true);
     if (['staff', 'dashboard2', 'dashboard'].includes(activeTab)) setIsTimetableOpen(true);
   }, [activeTab]);
@@ -462,41 +525,59 @@ export default function App() {
     if (!user) return;
 
     const unsubCampuses = onSnapshot(collection(db, 'campuses'), (snap) => {
-      setCampuses(snap.docs.map(d => ({ id: d.id, ...d.data() } as Campus)));
-    });
+      setCampuses(snap.docs.map(d => {
+        const data = d.data();
+        return { id: d.id, ...data, rooms: data.rooms || [] } as Campus;
+      }));
+    }, (err) => handleFirestoreError(err, OperationType.GET, 'campuses'));
     const unsubStaff = onSnapshot(collection(db, 'staff'), (snap) => {
-      setStaff(snap.docs.map(d => ({ id: d.id, ...d.data() } as Staff)));
-    });
+      setStaff(snap.docs.map(d => {
+        const data = d.data();
+        return { id: d.id, ...data, jobTitleIds: data.jobTitleIds || [], departmentIds: data.departmentIds || [] } as Staff;
+      }));
+    }, (err) => handleFirestoreError(err, OperationType.GET, 'staff'));
     const unsubClasses = onSnapshot(collection(db, 'classes'), (snap) => {
-      setClasses(snap.docs.map(d => ({ id: d.id, ...d.data() } as Class)));
-    });
+      setClasses(snap.docs.map(d => {
+        const data = d.data();
+        return { id: d.id, ...data, schedule: data.schedule || [] } as Class;
+      }));
+    }, (err) => handleFirestoreError(err, OperationType.GET, 'classes'));
     const unsubStudents = onSnapshot(collection(db, 'students'), (snap) => {
-      setStudents(snap.docs.map(d => ({ id: d.id, ...d.data() } as Student)));
-    });
+      setStudents(snap.docs.map(d => {
+        const data = d.data();
+        return { id: d.id, ...data, classIds: data.classIds || [] } as Student;
+      }));
+    }, (err) => handleFirestoreError(err, OperationType.GET, 'students'));
     const unsubPrograms = onSnapshot(collection(db, 'programs'), (snap) => {
       setPrograms(snap.docs.map(d => ({ id: d.id, ...d.data() } as Program)));
-    });
+    }, (err) => handleFirestoreError(err, OperationType.GET, 'programs'));
     const unsubJobTitles = onSnapshot(collection(db, 'jobTitles'), (snap) => {
       setJobTitles(snap.docs.map(d => ({ id: d.id, ...d.data() } as JobTitle)));
-    });
+    }, (err) => handleFirestoreError(err, OperationType.GET, 'jobTitles'));
     const unsubDepartments = onSnapshot(collection(db, 'departments'), (snap) => {
       setDepartments(snap.docs.map(d => ({ id: d.id, ...d.data() } as Department)));
-    });
+    }, (err) => handleFirestoreError(err, OperationType.GET, 'departments'));
     const unsubSessions = onSnapshot(collection(db, 'sessions'), (snap) => {
       setSessions(snap.docs.map(d => ({ id: d.id, ...d.data() } as Session)));
-    });
+    }, (err) => handleFirestoreError(err, OperationType.GET, 'sessions'));
     const unsubLeave = onSnapshot(collection(db, 'leaveUsage'), (snap) => {
       setLeaveUsage(snap.docs.map(d => ({ id: d.id, ...d.data() } as LeaveUsage)));
-    });
+    }, (err) => handleFirestoreError(err, OperationType.GET, 'leaveUsage'));
     const unsubTuition = onSnapshot(collection(db, 'tuitionRecords'), (snap) => {
       setTuitionRecords(snap.docs.map(d => ({ id: d.id, ...d.data() } as TuitionRecord)));
-    });
+    }, (err) => handleFirestoreError(err, OperationType.GET, 'tuitionRecords'));
     const unsubAttendance = onSnapshot(collection(db, 'attendanceRecords'), (snap) => {
       setAttendanceRecords(snap.docs.map(d => ({ id: d.id, ...d.data() } as AttendanceRecord)));
-    });
+    }, (err) => handleFirestoreError(err, OperationType.GET, 'attendanceRecords'));
+    const unsubWaitlist = onSnapshot(collection(db, 'waitlist'), (snap) => {
+      setWaitlist(snap.docs.map(d => ({ id: d.id, ...d.data() } as WaitlistEntry)));
+    }, (err) => handleFirestoreError(err, OperationType.GET, 'waitlist'));
     const unsubPermissions = onSnapshot(collection(db, 'permissions'), (snap) => {
-      setPermissions(snap.docs.map(d => ({ id: d.id, ...d.data() } as Permission)));
-    });
+      setPermissions(snap.docs.map(d => {
+        const data = d.data();
+        return { id: d.id, ...data, jobTitleIds: data.jobTitleIds || [] } as Permission;
+      }));
+    }, (err) => handleFirestoreError(err, OperationType.GET, 'permissions'));
 
     return () => {
       unsubCampuses();
@@ -510,6 +591,7 @@ export default function App() {
       unsubLeave();
       unsubTuition();
       unsubAttendance();
+      unsubWaitlist();
       unsubPermissions();
     };
   }, [user]);
@@ -552,7 +634,7 @@ export default function App() {
     if (user.email === 'quangtn01@gmail.com') return true;
     const perm = permissions.find(p => p.pageId === pageId);
     if (!perm) return false;
-    return perm.jobTitleIds.some(id => currentUserJobTitleIds.includes(id));
+    return perm.jobTitleIds?.some(id => currentUserJobTitleIds?.includes(id));
   };
 
   return (
@@ -602,12 +684,14 @@ export default function App() {
                            cat.isOpenKey === 'isCourseOpen' ? isCourseOpen :
                            cat.isOpenKey === 'isStudentOpen' ? isStudentOpen :
                            cat.isOpenKey === 'isTeacherOpen' ? isTeacherOpen :
+                           cat.isOpenKey === 'isOfficerOpen' ? isOfficerOpen :
                            cat.isOpenKey === 'isReportOpen' ? isReportOpen : false;
             
             const setIsOpen = cat.isOpenKey === 'isTimetableOpen' ? setIsTimetableOpen :
                               cat.isOpenKey === 'isCourseOpen' ? setIsCourseOpen :
                               cat.isOpenKey === 'isStudentOpen' ? setIsStudentOpen :
                               cat.isOpenKey === 'isTeacherOpen' ? setIsTeacherOpen :
+                              cat.isOpenKey === 'isOfficerOpen' ? setIsOfficerOpen :
                               cat.isOpenKey === 'isReportOpen' ? setIsReportOpen : () => {};
 
             return (
@@ -746,6 +830,16 @@ export default function App() {
             leaveUsage={leaveUsage}
           />
         )}
+        {activeTab.startsWith('officer') && (
+          <OfficerView 
+            subTab={activeTab === 'officer' ? 'waitlist' : activeTab.split('-')[1] as any}
+            waitlist={waitlist}
+            staff={staff}
+            classes={classes}
+            jobTitles={jobTitles}
+            students={students}
+          />
+        )}
         {activeTab.startsWith('report') && (
           <ReportView 
             subTab={activeTab === 'report' ? 'overview' : activeTab.split('-')[1] as any}
@@ -823,12 +917,16 @@ function SessionModal({ isOpen, onClose, editingSession, setEditingSession, camp
       attendanceStatus: editingSession.attendanceStatus || 'Not Done'
     } as any;
 
-    if (editingSession.id) {
-      await updateDoc(doc(db, 'sessions', editingSession.id), data);
-    } else {
-      await addDoc(collection(db, 'sessions'), data);
+    try {
+      if (editingSession.id) {
+        await updateDoc(doc(db, 'sessions', editingSession.id), data);
+      } else {
+        await addDoc(collection(db, 'sessions'), data);
+      }
+      onClose();
+    } catch (err) {
+      handleFirestoreError(err, editingSession.id ? OperationType.UPDATE : OperationType.CREATE, 'sessions');
     }
-    onClose();
   };
 
   const handleMarkDone = async () => {
@@ -837,12 +935,16 @@ function SessionModal({ isOpen, onClose, editingSession, setEditingSession, camp
       setConfirmDone(true);
       return;
     }
-    await updateDoc(doc(db, 'sessions', editingSession.id), {
-      status: 'Done'
-    });
-    setEditingSession({ ...editingSession, status: 'Done' });
-    setConfirmDone(false);
-    onClose();
+    try {
+      await updateDoc(doc(db, 'sessions', editingSession.id), {
+        status: 'Done'
+      });
+      setEditingSession({ ...editingSession, status: 'Done' });
+      setConfirmDone(false);
+      onClose();
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, 'sessions');
+    }
   };
 
   const handleDelete = async () => {
@@ -851,9 +953,13 @@ function SessionModal({ isOpen, onClose, editingSession, setEditingSession, camp
       setConfirmDelete(true);
       return;
     }
-    await deleteDoc(doc(db, 'sessions', editingSession.id));
-    onClose();
-    setConfirmDelete(false);
+    try {
+      await deleteDoc(doc(db, 'sessions', editingSession.id));
+      onClose();
+      setConfirmDelete(false);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, 'sessions');
+    }
   };
 
   return (
@@ -1088,8 +1194,8 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
             message: `Đã copy thành công ${prevSessions.length} buổi dạy sang tuần này!`,
             isSuccess: true
           });
-        } catch (error) {
-          console.error("Error copying sessions:", error);
+        } catch (err) {
+          handleFirestoreError(err, OperationType.WRITE, 'sessions');
           setCopyStatus({
             show: true,
             message: "Có lỗi xảy ra khi copy lịch dạy. Vui lòng thử lại.",
@@ -1165,58 +1271,62 @@ function DashboardView({ campuses, sessions, staff, classes, onAddSession }: {
       const ws = wb.Sheets[wsname];
       const jsonData = XLSX.utils.sheet_to_json(ws) as any[];
 
-      const batch = writeBatch(db);
-      
-      for (const row of jsonData) {
-        let startTime = '';
-        let endTime = '';
-        const dateVal = getValue(row, ['Date', 'Ngày']);
-        const startVal = getValue(row, ['Start Time', 'Giờ bắt đầu']);
-        const endVal = getValue(row, ['End Time', 'Giờ kết thúc']);
+      try {
+        const batch = writeBatch(db);
+        
+        for (const row of jsonData) {
+          let startTime = '';
+          let endTime = '';
+          const dateVal = getValue(row, ['Date', 'Ngày']);
+          const startVal = getValue(row, ['Start Time', 'Giờ bắt đầu']);
+          const endVal = getValue(row, ['End Time', 'Giờ kết thúc']);
 
-        if (dateVal && startVal && endVal) {
-          const parsedStart = parseExcelDate(dateVal, startVal);
-          const parsedEnd = parseExcelDate(dateVal, endVal);
-          if (parsedStart && parsedEnd) {
-            startTime = parsedStart;
-            endTime = parsedEnd;
+          if (dateVal && startVal && endVal) {
+            const parsedStart = parseExcelDate(dateVal, startVal);
+            const parsedEnd = parseExcelDate(dateVal, endVal);
+            if (parsedStart && parsedEnd) {
+              startTime = parsedStart;
+              endTime = parsedEnd;
+            }
+          }
+
+          if (!startTime) continue;
+
+          const weekStart = format(startOfWeek(parseISO(startTime), { weekStartsOn: 1 }), 'yyyy-MM-dd');
+
+          const sessionData: any = {
+            campusId: selectedCampusId,
+            room: getValue(row, ['Room', 'Phòng']) || '',
+            classId: classes.find(c => c.name === getValue(row, ['Class', 'Lớp']))?.id || '',
+            teacherId: getValue(row, ['Teacher ID', 'Mã GV']) || '',
+            taId: getValue(row, ['TA ID', 'Mã TA']) || '',
+            zoomId: getValue(row, ['Zoom ID', 'ID Zoom']) || '',
+            notes: getValue(row, ['Notes', 'Ghi chú']) || '',
+            startTime,
+            endTime,
+            weekStart,
+            status: 'Upcoming'
+          };
+
+          const systemId = getValue(row, ['ID (System)', 'ID Hệ thống']);
+          if (systemId) {
+            batch.update(doc(db, 'sessions', systemId), sessionData);
+          } else {
+            const newDoc = doc(collection(db, 'sessions'));
+            batch.set(newDoc, sessionData);
           }
         }
 
-        if (!startTime) continue;
-
-        const weekStart = format(startOfWeek(parseISO(startTime), { weekStartsOn: 1 }), 'yyyy-MM-dd');
-
-        const sessionData: any = {
-          campusId: selectedCampusId,
-          room: getValue(row, ['Room', 'Phòng']) || '',
-          classId: classes.find(c => c.name === getValue(row, ['Class', 'Lớp']))?.id || '',
-          teacherId: getValue(row, ['Teacher ID', 'Mã GV']) || '',
-          taId: getValue(row, ['TA ID', 'Mã TA']) || '',
-          zoomId: getValue(row, ['Zoom ID', 'ID Zoom']) || '',
-          notes: getValue(row, ['Notes', 'Ghi chú']) || '',
-          startTime,
-          endTime,
-          weekStart,
-          status: 'Upcoming'
-        };
-
-        const systemId = getValue(row, ['ID (System)', 'ID Hệ thống']);
-        if (systemId) {
-          batch.update(doc(db, 'sessions', systemId), sessionData);
-        } else {
-          const newDoc = doc(collection(db, 'sessions'));
-          batch.set(newDoc, sessionData);
-        }
+        await batch.commit();
+        setCopyStatus({
+          show: true,
+          message: "Đã import dữ liệu thành công!",
+          isSuccess: true
+        });
+        e.target.value = '';
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, 'sessions');
       }
-
-      await batch.commit();
-      setCopyStatus({
-        show: true,
-        message: "Đã import dữ liệu thành công!",
-        isSuccess: true
-      });
-      e.target.value = '';
     };
     reader.readAsArrayBuffer(file);
   };
@@ -1610,7 +1720,12 @@ function SchedulerView({ campuses, staff, classes, sessions, isModalOpen, setIsM
       });
     });
 
-    await batch.commit();
+    try {
+      await batch.commit();
+      alert("Copied sessions successfully!");
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'sessions');
+    }
   };
 
   return (
@@ -1654,7 +1769,15 @@ function SchedulerView({ campuses, staff, classes, sessions, isModalOpen, setIsM
             <div key={s.id} className="bg-white p-5 rounded-2xl border border-black/5 shadow-sm group relative">
               <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
                 <button onClick={() => { setEditingSession(s); setIsModalOpen(true); }} className="p-2 hover:bg-black/5 rounded-lg text-black/40 hover:text-black"><Settings size={14} /></button>
-                <button onClick={() => deleteDoc(doc(db, 'sessions', s.id))} className="p-2 hover:bg-red-50 rounded-lg text-red-400 hover:text-red-600"><Trash2 size={14} /></button>
+                <button onClick={async () => {
+                  if (confirm('Delete this session?')) {
+                    try {
+                      await deleteDoc(doc(db, 'sessions', s.id));
+                    } catch (err) {
+                      handleFirestoreError(err, OperationType.DELETE, 'sessions');
+                    }
+                  }
+                }} className="p-2 hover:bg-red-50 rounded-lg text-red-400 hover:text-red-600"><Trash2 size={14} /></button>
               </div>
               <p className="text-[10px] font-mono uppercase tracking-widest text-black/30 mb-2">{s.room}</p>
               <h3 className="font-bold text-lg mb-1">{classes.find(c => c.id === s.classId)?.name || 'Unknown Class'}</h3>
@@ -1724,7 +1847,7 @@ function TimetableTeacherView({ staff, sessions, classes, campuses, userEmail, s
     const initialData: Record<string, 'Present' | 'Absent'> = {};
     
     const classStudents = students
-      .filter(s => s.classIds.includes(session.classId) && (s.status === 'Study' || s.status === 'Trial'))
+      .filter(s => s.classIds?.includes(session.classId) && (s.status === 'Study' || s.status === 'Trial'))
       .sort((a, b) => a.studentId.localeCompare(b.studentId));
 
     classStudents.forEach(s => {
@@ -1751,20 +1874,24 @@ function TimetableTeacherView({ staff, sessions, classes, campuses, userEmail, s
       }))
     };
 
-    if (existingRecord) {
-      await updateDoc(doc(db, 'attendanceRecords', existingRecord.id), recordData);
-    } else {
-      await addDoc(collection(db, 'attendanceRecords'), recordData);
+    try {
+      if (existingRecord) {
+        await updateDoc(doc(db, 'attendanceRecords', existingRecord.id), recordData);
+      } else {
+        await addDoc(collection(db, 'attendanceRecords'), recordData);
+      }
+
+      // Update session status
+      await updateDoc(doc(db, 'sessions', activeSession.id), { 
+        attendanceStatus: 'Done',
+        status: 'Done' 
+      });
+
+      setIsMarkingOpen(false);
+      setActiveSession(null);
+    } catch (err) {
+      handleFirestoreError(err, existingRecord ? OperationType.UPDATE : OperationType.CREATE, 'attendanceRecords/sessions');
     }
-
-    // Update session status
-    await updateDoc(doc(db, 'sessions', activeSession.id), { 
-      attendanceStatus: 'Done',
-      status: 'Done' 
-    });
-
-    setIsMarkingOpen(false);
-    setActiveSession(null);
   };
 
   return (
@@ -1887,7 +2014,7 @@ function TimetableTeacherView({ staff, sessions, classes, campuses, userEmail, s
             <div className="p-8 max-h-[60vh] overflow-auto">
               <div className="space-y-2">
                 {students
-                  .filter(s => s.classIds.includes(activeSession.classId) && (s.status === 'Study' || s.status === 'Trial'))
+                  .filter(s => s.classIds?.includes(activeSession.classId) && (s.status === 'Study' || s.status === 'Trial'))
                   .sort((a, b) => a.studentId.localeCompare(b.studentId))
                   .map((s, idx) => (
                     <div key={s.id} className="flex items-center justify-between p-4 bg-black/[0.02] rounded-2xl">
@@ -2088,83 +2215,151 @@ function ManagementView({
       name: newCampus.name,
       rooms: rooms
     };
-    if (newCampus.id) {
-      await updateDoc(doc(db, 'campuses', newCampus.id), data);
-    } else {
-      await addDoc(collection(db, 'campuses'), data);
+    try {
+      if (newCampus.id) {
+        await updateDoc(doc(db, 'campuses', newCampus.id), data);
+      } else {
+        await addDoc(collection(db, 'campuses'), data);
+      }
+      setNewCampus({ name: '', rooms: '' });
+    } catch (err) {
+      handleFirestoreError(err, newCampus.id ? OperationType.UPDATE : OperationType.CREATE, 'campuses');
     }
-    setNewCampus({ name: '', rooms: '' });
   };
 
   const saveProgram = async () => {
     if (!newProgram.name) return;
     const data = { name: newProgram.name };
-    if (newProgram.id) {
-      await updateDoc(doc(db, 'programs', newProgram.id), data);
-    } else {
-      await addDoc(collection(db, 'programs'), data);
+    try {
+      if (newProgram.id) {
+        await updateDoc(doc(db, 'programs', newProgram.id), data);
+      } else {
+        await addDoc(collection(db, 'programs'), data);
+      }
+      setNewProgram({ name: '' });
+    } catch (err) {
+      handleFirestoreError(err, newProgram.id ? OperationType.UPDATE : OperationType.CREATE, 'programs');
     }
-    setNewProgram({ name: '' });
   };
 
   const saveJobTitle = async () => {
     if (!newJobTitle.name) return;
     const data = { name: newJobTitle.name };
-    if (newJobTitle.id) {
-      await updateDoc(doc(db, 'jobTitles', newJobTitle.id), data);
-    } else {
-      await addDoc(collection(db, 'jobTitles'), data);
+    try {
+      if (newJobTitle.id) {
+        await updateDoc(doc(db, 'jobTitles', newJobTitle.id), data);
+      } else {
+        await addDoc(collection(db, 'jobTitles'), data);
+      }
+      setNewJobTitle({ name: '' });
+    } catch (err) {
+      handleFirestoreError(err, newJobTitle.id ? OperationType.UPDATE : OperationType.CREATE, 'jobTitles');
     }
-    setNewJobTitle({ name: '' });
   };
 
   const saveDepartment = async () => {
     if (!newDepartment.name) return;
     const data = { name: newDepartment.name };
-    if (newDepartment.id) {
-      await updateDoc(doc(db, 'departments', newDepartment.id), data);
-    } else {
-      await addDoc(collection(db, 'departments'), data);
+    try {
+      if (newDepartment.id) {
+        await updateDoc(doc(db, 'departments', newDepartment.id), data);
+      } else {
+        await addDoc(collection(db, 'departments'), data);
+      }
+      setNewDepartment({ name: '' });
+    } catch (err) {
+      handleFirestoreError(err, newDepartment.id ? OperationType.UPDATE : OperationType.CREATE, 'departments');
     }
-    setNewDepartment({ name: '' });
   };
 
   const initDefaultPrograms = async () => {
-    const defaults = ['TOEIC', 'IELTS', 'KID', 'KET-PET-FCE', 'GIAO TIẾP', 'OTHER'];
-    for (const name of defaults) {
-      if (!programs.find(p => p.name === name)) {
-        await addDoc(collection(db, 'programs'), { name });
+    try {
+      const defaults = ['TOEIC', 'IELTS', 'KID', 'KET-PET-FCE', 'GIAO TIẾP', 'OTHER'];
+      for (const name of defaults) {
+        if (!programs.find(p => p.name === name)) {
+          await addDoc(collection(db, 'programs'), { name });
+        }
       }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'programs');
     }
   };
 
   const initDefaultJobTitles = async () => {
-    const defaults = ['Teacher', 'CEO', 'Director', 'Team Leader', 'BOD', 'TA', 'Admin', 'Sale', 'Manager'];
-    for (const name of defaults) {
-      if (!jobTitles.find(j => j.name === name)) {
-        await addDoc(collection(db, 'jobTitles'), { name });
+    try {
+      const defaults = ['Teacher', 'CEO', 'Director', 'Team Leader', 'BOD', 'TA', 'Admin', 'Sale', 'Manager'];
+      for (const name of defaults) {
+        if (!jobTitles.find(j => j.name === name)) {
+          await addDoc(collection(db, 'jobTitles'), { name });
+        }
       }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'jobTitles');
     }
   };
 
   const initDefaultDepartments = async () => {
-    const defaults = ['TOEIC', 'IELTS', 'ADMIN', 'KIDS'];
-    for (const name of defaults) {
-      if (!departments.find(d => d.name === name)) {
-        await addDoc(collection(db, 'departments'), { name });
+    try {
+      const defaults = ['TOEIC', 'IELTS', 'ADMIN', 'KIDS'];
+      for (const name of defaults) {
+        if (!departments.find(d => d.name === name)) {
+          await addDoc(collection(db, 'departments'), { name });
+        }
       }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'departments');
+    }
+  };
+
+  const deleteCampus = async (id: string) => {
+    if (!confirm('Delete this campus?')) return;
+    try {
+      await deleteDoc(doc(db, 'campuses', id));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, 'campuses');
+    }
+  };
+
+  const deleteProgram = async (id: string) => {
+    if (!confirm('Delete this program?')) return;
+    try {
+      await deleteDoc(doc(db, 'programs', id));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, 'programs');
+    }
+  };
+
+  const deleteJobTitle = async (id: string) => {
+    if (!confirm('Delete this job title?')) return;
+    try {
+      await deleteDoc(doc(db, 'jobTitles', id));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, 'jobTitles');
+    }
+  };
+
+  const deleteDepartment = async (id: string) => {
+    if (!confirm('Delete this department?')) return;
+    try {
+      await deleteDoc(doc(db, 'departments', id));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, 'departments');
     }
   };
 
   const togglePermission = async (pageId: string, jobTitleId: string) => {
-    const existing = permissions.find(p => p.pageId === pageId);
-    if (existing) {
-      const newJobTitleIds = existing.jobTitleIds.includes(jobTitleId)
-        ? existing.jobTitleIds.filter(id => id !== jobTitleId)
-        : [...existing.jobTitleIds, jobTitleId];
-      await updateDoc(doc(db, 'permissions', existing.id), { jobTitleIds: newJobTitleIds });
-    } else {
-      await addDoc(collection(db, 'permissions'), { pageId, jobTitleIds: [jobTitleId] });
+    try {
+      const existing = permissions.find(p => p.pageId === pageId);
+      if (existing) {
+        const newJobTitleIds = existing.jobTitleIds?.includes(jobTitleId)
+          ? existing.jobTitleIds.filter(id => id !== jobTitleId)
+          : [...existing.jobTitleIds, jobTitleId];
+        await updateDoc(doc(db, 'permissions', existing.id), { jobTitleIds: newJobTitleIds });
+      } else {
+        await addDoc(collection(db, 'permissions'), { pageId, jobTitleIds: [jobTitleId] });
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'permissions');
     }
   };
 
@@ -2196,7 +2391,7 @@ function ManagementView({
                 </div>
                 <div className="flex gap-2">
                   <button onClick={() => setNewCampus({ id: c.id, name: c.name, rooms: (c.rooms || []).join(', ') })} className="text-emerald-600 hover:text-emerald-700 p-1"><Settings size={16} /></button>
-                  <button onClick={() => deleteDoc(doc(db, 'campuses', c.id))} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16} /></button>
+                  <button onClick={() => deleteCampus(c.id)} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16} /></button>
                 </div>
               </div>
             ))}
@@ -2229,7 +2424,7 @@ function ManagementView({
                 <p className="font-bold text-sm">{p.name}</p>
                 <div className="flex gap-2">
                   <button onClick={() => setNewProgram({ id: p.id, name: p.name })} className="text-emerald-600 hover:text-emerald-700 p-1"><Settings size={16} /></button>
-                  <button onClick={() => deleteDoc(doc(db, 'programs', p.id))} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16} /></button>
+                  <button onClick={() => deleteProgram(p.id)} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16} /></button>
                 </div>
               </div>
             ))}
@@ -2262,7 +2457,7 @@ function ManagementView({
                 <p className="font-bold text-sm">{j.name}</p>
                 <div className="flex gap-2">
                   <button onClick={() => setNewJobTitle({ id: j.id, name: j.name })} className="text-emerald-600 hover:text-emerald-700 p-1"><Settings size={16} /></button>
-                  <button onClick={() => deleteDoc(doc(db, 'jobTitles', j.id))} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16} /></button>
+                  <button onClick={() => deleteJobTitle(j.id)} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16} /></button>
                 </div>
               </div>
             ))}
@@ -2295,7 +2490,7 @@ function ManagementView({
                 <p className="font-bold text-sm">{d.name}</p>
                 <div className="flex gap-2">
                   <button onClick={() => setNewDepartment({ id: d.id, name: d.name })} className="text-emerald-600 hover:text-emerald-700 p-1"><Settings size={16} /></button>
-                  <button onClick={() => deleteDoc(doc(db, 'departments', d.id))} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16} /></button>
+                  <button onClick={() => deleteDepartment(d.id)} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={16} /></button>
                 </div>
               </div>
             ))}
@@ -2340,7 +2535,7 @@ function ManagementView({
                         <td className="p-4">
                           <div className="flex flex-wrap gap-3">
                             {jobTitles.map(jt => {
-                              const isChecked = permissions.find(p => p.pageId === cat.id)?.jobTitleIds.includes(jt.id) || false;
+                              const isChecked = permissions.find(p => p.pageId === cat.id)?.jobTitleIds?.includes(jt.id) || false;
                               return (
                                 <label key={jt.id} className="flex items-center gap-2 cursor-pointer group">
                                   <div 
@@ -2373,7 +2568,7 @@ function ManagementView({
                         <td className="p-4">
                           <div className="flex flex-wrap gap-3">
                             {jobTitles.map(jt => {
-                              const isChecked = permissions.find(p => p.pageId === page.id)?.jobTitleIds.includes(jt.id) || false;
+                              const isChecked = permissions.find(p => p.pageId === page.id)?.jobTitleIds?.includes(jt.id) || false;
                               return (
                                 <label key={jt.id} className="flex items-center gap-2 cursor-pointer group">
                                   <div 
@@ -2449,28 +2644,40 @@ function LeaveTrackerView({ staff, leaveUsage }: { staff: Staff[], leaveUsage: L
 
   const handleAddLeave = async () => {
     if (!selectedStaffId) return;
-    await addDoc(collection(db, 'leaveUsage'), {
-      staffId: selectedStaffId,
-      date: todayStr,
-      days: newLeaveDays,
-      reason: newLeaveNote
-    });
-    setNewLeaveDays(1);
-    setNewLeaveNote('');
+    try {
+      await addDoc(collection(db, 'leaveUsage'), {
+        staffId: selectedStaffId,
+        date: todayStr,
+        days: newLeaveDays,
+        reason: newLeaveNote
+      });
+      setNewLeaveDays(1);
+      setNewLeaveNote('');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'leaveUsage');
+    }
   };
 
   const handleUpdateLeave = async () => {
     if (!editingLeave) return;
-    await updateDoc(doc(db, 'leaveUsage', editingLeave.id), {
-      days: editingLeave.days,
-      reason: editingLeave.reason
-    });
-    setEditingLeave(null);
+    try {
+      await updateDoc(doc(db, 'leaveUsage', editingLeave.id), {
+        days: editingLeave.days,
+        reason: editingLeave.reason
+      });
+      setEditingLeave(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, 'leaveUsage');
+    }
   };
 
   const handleDeleteLeave = async (id: string) => {
     if (confirm('Are you sure you want to delete this leave entry?')) {
-      await deleteDoc(doc(db, 'leaveUsage', id));
+      try {
+        await deleteDoc(doc(db, 'leaveUsage', id));
+      } catch (err) {
+        handleFirestoreError(err, OperationType.DELETE, 'leaveUsage');
+      }
     }
   };
 
@@ -2834,40 +3041,44 @@ function TeacherView({ subTab, staff, jobTitles, departments, classes, sessions,
   };
 
   const migrateStaffIds = async () => {
-    const batch = writeBatch(db);
-    const alphabetStaff = [...staff].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-    
-    const idMap: Record<string, string> = {}; // Old ID/StaffId -> New Staff ID (NVxxx)
+    try {
+      const batch = writeBatch(db);
+      const alphabetStaff = [...staff].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      
+      const idMap: Record<string, string> = {}; // Old ID/StaffId -> New Staff ID (NVxxx)
 
-    alphabetStaff.forEach((s, idx) => {
-      const newStaffId = `NV${(idx + 1).toString().padStart(3, '0')}`;
-      if (s.staffId) idMap[s.staffId] = newStaffId;
-      idMap[s.id] = newStaffId;
-      batch.update(doc(db, 'staff', s.id), { staffId: newStaffId });
-    });
+      alphabetStaff.forEach((s, idx) => {
+        const newStaffId = `NV${(idx + 1).toString().padStart(3, '0')}`;
+        if (s.staffId) idMap[s.staffId] = newStaffId;
+        idMap[s.id] = newStaffId;
+        batch.update(doc(db, 'staff', s.id), { staffId: newStaffId });
+      });
 
-    // Update classes
-    classes.forEach(c => {
-      const updates: any = {};
-      if (c.teacherId && idMap[c.teacherId]) updates.teacherId = idMap[c.teacherId];
-      if (c.taId && idMap[c.taId]) updates.taId = idMap[c.taId];
-      if (Object.keys(updates).length > 0) {
-        batch.update(doc(db, 'classes', c.id), updates);
-      }
-    });
+      // Update classes
+      classes.forEach(c => {
+        const updates: any = {};
+        if (c.teacherId && idMap[c.teacherId]) updates.teacherId = idMap[c.teacherId];
+        if (c.taId && idMap[c.taId]) updates.taId = idMap[c.taId];
+        if (Object.keys(updates).length > 0) {
+          batch.update(doc(db, 'classes', c.id), updates);
+        }
+      });
 
-    // Update sessions
-    sessions.forEach(s => {
-      const updates: any = {};
-      if (s.teacherId && idMap[s.teacherId]) updates.teacherId = idMap[s.teacherId];
-      if (s.taId && idMap[s.taId]) updates.taId = idMap[s.taId];
-      if (Object.keys(updates).length > 0) {
-        batch.update(doc(db, 'sessions', s.id), updates);
-      }
-    });
+      // Update sessions
+      sessions.forEach(s => {
+        const updates: any = {};
+        if (s.teacherId && idMap[s.teacherId]) updates.teacherId = idMap[s.teacherId];
+        if (s.taId && idMap[s.taId]) updates.taId = idMap[s.taId];
+        if (Object.keys(updates).length > 0) {
+          batch.update(doc(db, 'sessions', s.id), updates);
+        }
+      });
 
-    await batch.commit();
-    alert("Migration complete! All staff assigned IDs and references updated.");
+      await batch.commit();
+      alert("Migration complete! All staff assigned IDs and references updated.");
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'staff/classes/sessions');
+    }
   };
 
   const fixSpecificStaffId = async () => {
@@ -2904,8 +3115,12 @@ function TeacherView({ subTab, staff, jobTitles, departments, classes, sessions,
       }
     });
 
-    await batch.commit();
-    alert(`Updated ${target.name} to ${newId} and updated all references.`);
+    try {
+      await batch.commit();
+      alert(`Updated ${target.name} to ${newId} and updated all references.`);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'staff/classes/sessions');
+    }
   };
 
   const exportToExcel = () => {
@@ -2991,9 +3206,13 @@ function TeacherView({ subTab, staff, jobTitles, departments, classes, sessions,
         }
       }
 
-      await batch.commit();
-      alert("Import complete!");
-      e.target.value = '';
+      try {
+        await batch.commit();
+        alert("Import complete!");
+        e.target.value = '';
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, 'staff');
+      }
     };
     reader.readAsArrayBuffer(file);
   };
@@ -3025,13 +3244,17 @@ function TeacherView({ subTab, staff, jobTitles, departments, classes, sessions,
       bankName: editingStaff.bankName || ''
     };
 
-    if (editingStaff.id) {
-      await updateDoc(doc(db, 'staff', editingStaff.id), data);
-    } else {
-      await addDoc(collection(db, 'staff'), data);
+    try {
+      if (editingStaff.id) {
+        await updateDoc(doc(db, 'staff', editingStaff.id), data);
+      } else {
+        await addDoc(collection(db, 'staff'), data);
+      }
+      setEditingStaff(null);
+      setIsFormOpen(false);
+    } catch (err) {
+      handleFirestoreError(err, editingStaff.id ? OperationType.UPDATE : OperationType.CREATE, 'staff');
     }
-    setEditingStaff(null);
-    setIsFormOpen(false);
   };
 
   const deleteStaff = async () => {
@@ -3040,15 +3263,19 @@ function TeacherView({ subTab, staff, jobTitles, departments, classes, sessions,
       setConfirmDelete(true);
       return;
     }
-    await deleteDoc(doc(db, 'staff', editingStaff.id));
-    setEditingStaff(null);
-    setIsFormOpen(false);
-    setConfirmDelete(false);
+    try {
+      await deleteDoc(doc(db, 'staff', editingStaff.id));
+      setEditingStaff(null);
+      setIsFormOpen(false);
+      setConfirmDelete(false);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, 'staff');
+    }
   };
 
   const toggleSelection = (field: 'jobTitleIds' | 'departmentIds', id: string) => {
     const current = editingStaff?.[field] || [];
-    const next = current.includes(id) ? current.filter(i => i !== id) : [...current, id];
+    const next = current?.includes(id) ? current.filter(i => i !== id) : [...(current || []), id];
     setEditingStaff({ ...editingStaff, [field]: next });
   };
 
@@ -3764,7 +3991,7 @@ function CourseSummaryView({ classes, programs, staff, students }: {
   });
 
   const getStudentsInClass = (classId: string) => {
-    return students.filter(s => s.classIds.includes(classId) && s.status === 'Study').length;
+    return students.filter(s => s.classIds?.includes(classId) && s.status === 'Study').length;
   };
 
   const formatSchedule = (schedule: ScheduleItem[]) => {
@@ -4385,7 +4612,7 @@ function TuitionView({ classes, students, tuitionRecords }: { classes: Class[], 
   const selectedClass = classes.find(c => c.id === selectedClassId);
 
   const classStudents = students
-    .filter(s => s.classIds.includes(selectedClassId))
+    .filter(s => s.classIds?.includes(selectedClassId))
     .sort((a, b) => a.studentId.localeCompare(b.studentId));
 
   const months = useMemo(() => {
@@ -4419,18 +4646,26 @@ function TuitionView({ classes, students, tuitionRecords }: { classes: Class[], 
       note
     };
 
-    if (record) {
-      await updateDoc(doc(db, 'tuitionRecords', record.id), data);
-    } else {
-      await addDoc(collection(db, 'tuitionRecords'), data);
+    try {
+      if (record) {
+        await updateDoc(doc(db, 'tuitionRecords', record.id), data);
+      } else {
+        await addDoc(collection(db, 'tuitionRecords'), data);
+      }
+      setEditingRecord(null);
+    } catch (err) {
+      handleFirestoreError(err, record ? OperationType.UPDATE : OperationType.CREATE, 'tuitionRecords');
     }
-    setEditingRecord(null);
   };
 
   const handleDelete = async () => {
     if (!editingRecord?.record) return;
-    await deleteDoc(doc(db, 'tuitionRecords', editingRecord.record.id));
-    setEditingRecord(null);
+    try {
+      await deleteDoc(doc(db, 'tuitionRecords', editingRecord.record.id));
+      setEditingRecord(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, 'tuitionRecords');
+    }
   };
 
   return (
@@ -4604,12 +4839,12 @@ function AttendanceView({ classes, students, attendanceRecords, sessions }: {
     const sessionClassIds = sessions
       .filter(s => safeFormat(s.startTime, 'yyyy-MM-dd') === selectedDate)
       .map(s => s.classId);
-    return activeClasses.filter(c => sessionClassIds.includes(c.id));
+    return activeClasses.filter(c => sessionClassIds?.includes(c.id));
   }, [sessions, selectedDate, activeClasses]);
 
   const selectedClass = classes.find(c => c.id === selectedClassId);
   const classStudents = students
-    .filter(s => s.classIds.includes(selectedClassId) && (s.status === 'Study' || s.status === 'Trial'))
+    .filter(s => s.classIds?.includes(selectedClassId) && (s.status === 'Study' || s.status === 'Trial'))
     .sort((a, b) => a.studentId.localeCompare(b.studentId));
 
   const attendanceHistoryDates = useMemo(() => {
@@ -4851,6 +5086,542 @@ function AttendanceView({ classes, students, attendanceRecords, sessions }: {
               <Button onClick={() => setIsMarkingOpen(false)} className="flex-1 bg-black/5 hover:bg-black/10">Hủy</Button>
               <Button onClick={saveAttendance} className="flex-1 bg-blue-600 text-white hover:bg-blue-700">Lưu điểm danh</Button>
             </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- View: Officer ---
+
+function OfficerView({
+  subTab,
+  waitlist,
+  staff,
+  classes,
+  jobTitles,
+  students
+}: {
+  subTab: 'waitlist',
+  waitlist: WaitlistEntry[],
+  staff: Staff[],
+  classes: Class[],
+  jobTitles: JobTitle[],
+  students: Student[]
+}) {
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [editingWaitlist, setEditingWaitlist] = useState<WaitlistEntry | null>(null);
+  const [enrollingWaitlist, setEnrollingWaitlist] = useState<WaitlistEntry | null>(null);
+  const [filterCycle, setFilterCycle] = useState<string>('all');
+  const [filterConsultantId, setFilterConsultantId] = useState<string>('all');
+  const [filterClassId, setFilterClassId] = useState<string>('all');
+
+  // For Enrollment Form
+  const [enrollData, setEnrollData] = useState<Partial<Student>>({});
+
+  // Find job title ID for "Consultant"
+  const consultantJobTitle = jobTitles.find(jt => jt.name.toLowerCase().includes('consultant'));
+  const consultants = staff.filter(s => s.jobTitleIds?.includes(consultantJobTitle?.id || ''));
+
+  // Derive available cycles from waitlist
+  const cycles = useMemo(() => {
+    const set = new Set<string>();
+    waitlist.forEach(item => {
+      if (item.createdAt) {
+        set.add(safeFormat(item.createdAt, 'MM/yyyy'));
+      }
+    });
+    return Array.from(set).sort((a, b) => {
+      const [mA, yA] = a.split('/').map(Number);
+      const [mB, yB] = b.split('/').map(Number);
+      return yB !== yA ? yB - yA : mB - mA;
+    });
+  }, [waitlist]);
+
+  const handleSaveWaitlist = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    const data: Partial<WaitlistEntry> = {
+      name: formData.get('name') as string,
+      phone: formData.get('phone') as string,
+      source: formData.get('source') as any,
+      consultantId: formData.get('consultantId') as string,
+      desiredClassId: (formData.get('desiredClassId') as string) || null,
+      referrerStaffId: (formData.get('referrerStaffId') as string) || null,
+      notes: formData.get('notes') as string
+    };
+
+    try {
+      if (editingWaitlist) {
+        await updateDoc(doc(db, 'waitlist', editingWaitlist.id), data);
+      } else {
+        await addDoc(collection(db, 'waitlist'), {
+          ...data,
+          consultationCount: 1,
+          status: 'Waiting',
+          createdAt: new Date().toISOString()
+        });
+      }
+      setIsAddModalOpen(false);
+      setEditingWaitlist(null);
+    } catch (err) {
+      handleFirestoreError(err, editingWaitlist ? OperationType.UPDATE : OperationType.CREATE, 'waitlist');
+    }
+  };
+
+  const handleUpdateConsultation = async (id: string, currentCount: number) => {
+    if (currentCount >= 3) return;
+    try {
+      await updateDoc(doc(db, 'waitlist', id), {
+        consultationCount: (currentCount + 1) as any
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, 'waitlist');
+    }
+  };
+
+  const handleMarkFailed = async (id: string) => {
+    try {
+      await updateDoc(doc(db, 'waitlist', id), {
+        status: 'Failed'
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, 'waitlist');
+    }
+  };
+
+  const handleEnrollSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!enrollingWaitlist || !enrollData.name) return;
+
+    try {
+      // 1. Generate Student ID
+      const lastStudent = [...students].sort((a, b) => b.studentId.localeCompare(a.studentId))[0];
+      const nextId = lastStudent 
+        ? `HV${(parseInt(lastStudent.studentId.replace('HV', '')) + 1).toString().padStart(6, '0')}`
+        : 'HV000001';
+
+      // 2. Create Student
+      const studentData = {
+        ...enrollData,
+        studentId: nextId,
+        createdAt: new Date().toISOString()
+      };
+      await addDoc(collection(db, 'students'), studentData);
+
+      // 3. Update Waitlist Status
+      await updateDoc(doc(db, 'waitlist', enrollingWaitlist.id), {
+        status: 'Enrolled'
+      });
+
+      setEnrollingWaitlist(null);
+      setEnrollData({});
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'waitlist/enroll');
+    }
+  };
+
+  const filteredWaitlist = waitlist
+    .filter(item => item.status === 'Waiting')
+    .filter(item => filterConsultantId === 'all' || item.consultantId === filterConsultantId)
+    .filter(item => filterClassId === 'all' || item.desiredClassId === filterClassId)
+    .filter(item => filterCycle === 'all' || safeFormat(item.createdAt, 'MM/yyyy') === filterCycle)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between pl-12">
+        <h1 className="text-3xl font-serif italic">Officer: Waitlist</h1>
+        <Button 
+          onClick={() => setIsAddModalOpen(true)}
+          className="bg-emerald-600 text-white hover:bg-emerald-700 rounded-2xl px-6"
+        >
+          Add Potential Student
+        </Button>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-wrap gap-4 bg-white p-6 rounded-[32px] border border-black/5 shadow-sm">
+        <div className="flex-1 min-w-[200px]">
+          <label className="text-[10px] uppercase font-bold text-black/40 mb-2 block">Filter by Cycle</label>
+          <select 
+            value={filterCycle} 
+            onChange={(e) => setFilterCycle(e.target.value)}
+            className="w-full bg-black/[0.02] border-none rounded-xl text-sm p-3"
+          >
+            <option value="all">All Cycles</option>
+            {cycles.map(c => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex-1 min-w-[200px]">
+          <label className="text-[10px] uppercase font-bold text-black/40 mb-2 block">Consultant</label>
+          <select 
+            value={filterConsultantId} 
+            onChange={(e) => setFilterConsultantId(e.target.value)}
+            className="w-full bg-black/[0.02] border-none rounded-xl text-sm p-3"
+          >
+            <option value="all">All Consultants</option>
+            {consultants.map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex-1 min-w-[200px]">
+          <label className="text-[10px] uppercase font-bold text-black/40 mb-2 block">Desired Class</label>
+          <select 
+            value={filterClassId} 
+            onChange={(e) => setFilterClassId(e.target.value)}
+            className="w-full bg-black/[0.02] border-none rounded-xl text-sm p-3"
+          >
+            <option value="all">All Classes</option>
+            {classes.filter(c => c.status === 'Active').map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Waitlist Table */}
+      <div className="bg-white rounded-[40px] border border-black/5 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="border-b border-black/5">
+                <th className="p-6 text-[10px] uppercase font-bold text-black/40">Student Info</th>
+                <th className="p-6 text-[10px] uppercase font-bold text-black/40">Phone Number</th>
+                <th className="p-6 text-[10px] uppercase font-bold text-black/40">Source / Referrer</th>
+                <th className="p-6 text-[10px] uppercase font-bold text-black/40">Consultant</th>
+                <th className="p-6 text-[10px] uppercase font-bold text-black/40">Desired Class</th>
+                <th className="p-6 text-[10px] uppercase font-bold text-black/40">Status (Cycle)</th>
+                <th className="p-6 text-[10px] uppercase font-bold text-black/40">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-black/[0.02]">
+              {filteredWaitlist.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="p-12 text-center text-black/40 font-serif italic">No students in waitlist</td>
+                </tr>
+              ) : (
+                filteredWaitlist.map(entry => (
+                  <tr key={entry.id} className="hover:bg-black/[0.01] transition-colors">
+                    <td className="p-6">
+                      <p className="font-bold text-sm">{entry.name}</p>
+                      <p className="text-[10px] text-black/30 font-mono">ID: {entry.id.substring(0, 6).toUpperCase()}</p>
+                    </td>
+                    <td className="p-6">
+                      <p className="font-mono text-sm text-blue-600 font-bold">{entry.phone}</p>
+                    </td>
+                    <td className="p-6">
+                      <div className="flex items-center gap-2">
+                        <span className={cn(
+                          "px-2 py-0.5 rounded-full text-[10px] font-bold uppercase",
+                          entry.source === 'Direct' ? "bg-emerald-50 text-emerald-600" :
+                          entry.source === 'Zalo' ? "bg-blue-50 text-blue-600" :
+                          entry.source === 'Facebook' ? "bg-indigo-50 text-indigo-600" :
+                          "bg-gray-50 text-gray-600"
+                        )}>
+                          {entry.source}
+                        </span>
+                        {entry.referrerStaffId && (
+                          <span className="text-[10px] text-black/40 italic">
+                            via {staff.find(s => s.id === entry.referrerStaffId)?.name}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="p-6">
+                      <p className="text-sm font-medium">{staff.find(s => s.id === entry.consultantId)?.name}</p>
+                    </td>
+                    <td className="p-6">
+                      <p className="text-sm">{classes.find(c => c.id === entry.desiredClassId)?.name || 'Not specified'}</p>
+                    </td>
+                    <td className="p-6">
+                      <div className="flex flex-col gap-1">
+                        <div className="flex gap-1">
+                          {[1, 2, 3].map(i => (
+                            <div 
+                              key={i} 
+                              className={cn(
+                                "w-6 h-1.5 rounded-full",
+                                i <= entry.consultationCount ? "bg-emerald-500" : "bg-black/5"
+                              )}
+                            />
+                          ))}
+                        </div>
+                        <p className="text-[10px] font-bold text-black/40 uppercase">
+                          Consultation {entry.consultationCount}/3
+                        </p>
+                      </div>
+                    </td>
+                    <td className="p-6">
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={() => {
+                            setEnrollingWaitlist(entry);
+                            setEnrollData({
+                              name: entry.name,
+                              phone: entry.phone,
+                              classIds: entry.desiredClassId ? [entry.desiredClassId] : [],
+                              status: 'Study'
+                            });
+                          }}
+                          className="px-3 py-1.5 bg-emerald-600 text-white text-[10px] font-bold uppercase rounded-lg hover:bg-emerald-700 transition-colors"
+                        >
+                          Enroll
+                        </button>
+                        <button 
+                          onClick={() => {
+                            setEditingWaitlist(entry);
+                            setIsAddModalOpen(true);
+                          }}
+                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-xl transition-colors"
+                          title="Edit"
+                        >
+                          <Settings size={14} />
+                        </button>
+                        <button 
+                          onClick={() => handleUpdateConsultation(entry.id, entry.consultationCount)}
+                          disabled={entry.consultationCount >= 3}
+                          className="p-2 text-amber-600 hover:bg-amber-50 rounded-xl transition-colors disabled:opacity-30"
+                          title="Next Consultation Cycle"
+                        >
+                          <RefreshCw size={14} />
+                        </button>
+                        <button 
+                          onClick={() => handleMarkFailed(entry.id)}
+                          className="p-2 text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+                          title="Mark Failed"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Add/Edit Modal */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
+          <div className="bg-white rounded-[40px] w-full max-w-lg overflow-hidden shadow-2xl">
+            <div className="p-8 border-b border-black/5 flex items-center justify-between">
+              <h2 className="text-2xl font-serif italic">{editingWaitlist ? 'Edit Potential Student' : 'Add Potential Student'}</h2>
+              <button onClick={() => { setIsAddModalOpen(false); setEditingWaitlist(null); }} className="p-2 hover:bg-black/5 rounded-full">
+                <X size={20} />
+              </button>
+            </div>
+            <form onSubmit={handleSaveWaitlist} className="p-8 space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase font-bold text-black/40">Full Name</label>
+                  <input name="name" required defaultValue={editingWaitlist?.name} className="w-full bg-black/[0.02] border-none rounded-2xl p-4 text-sm" placeholder="Student Name" />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase font-bold text-black/40">Phone Number</label>
+                  <input name="phone" required defaultValue={editingWaitlist?.phone} className="w-full bg-black/[0.02] border-none rounded-2xl p-4 text-sm" placeholder="090..." />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase font-bold text-black/40">Source</label>
+                  <select name="source" required defaultValue={editingWaitlist?.source || 'Direct'} className="w-full bg-black/[0.02] border-none rounded-2xl p-4 text-sm">
+                    <option value="Direct">Direct</option>
+                    <option value="Zalo">Zalo</option>
+                    <option value="Facebook">Facebook</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase font-bold text-black/40">Consultant (Mandatory)</label>
+                  <select name="consultantId" required defaultValue={editingWaitlist?.consultantId} className="w-full bg-black/[0.02] border-none rounded-2xl p-4 text-sm">
+                    <option value="">Select Consultant</option>
+                    {consultants.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase font-bold text-black/40">Desired Class (Optional)</label>
+                  <select name="desiredClassId" defaultValue={editingWaitlist?.desiredClassId || ''} className="w-full bg-black/[0.02] border-none rounded-2xl p-4 text-sm">
+                    <option value="">Select Class</option>
+                    {classes.filter(c => c.status === 'Active').map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase font-bold text-black/40">Referrer (Optional)</label>
+                  <select name="referrerStaffId" defaultValue={editingWaitlist?.referrerStaffId || ''} className="w-full bg-black/[0.02] border-none rounded-2xl p-4 text-sm">
+                    <option value="">None</option>
+                    {staff.map(s => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] uppercase font-bold text-black/40">Notes</label>
+                <textarea 
+                  name="notes"
+                  defaultValue={editingWaitlist?.notes}
+                  className="w-full bg-black/[0.02] border-none rounded-2xl p-4 text-sm min-h-[100px]"
+                  placeholder="Additional information..."
+                />
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <Button type="button" onClick={() => { setIsAddModalOpen(false); setEditingWaitlist(null); }} className="flex-1 bg-black/5 hover:bg-black/10">Cancel</Button>
+                <Button type="submit" className="flex-1 bg-emerald-600 text-white hover:bg-emerald-700">
+                  {editingWaitlist ? 'Update Student' : 'Save Student'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Enroll Modal */}
+      {enrollingWaitlist && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/20 backdrop-blur-sm">
+          <div className="bg-white rounded-[40px] shadow-2xl border border-black/5 w-full max-w-3xl overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-8 border-b border-black/5 bg-gray-50/50 flex justify-between items-center">
+              <div>
+                <h2 className="text-2xl font-bold">Enroll Student</h2>
+                <p className="text-sm text-black/40">Converting waitlist entry to student record</p>
+              </div>
+              <button onClick={() => setEnrollingWaitlist(null)} className="p-2 hover:bg-black/5 rounded-full transition-colors">
+                <X size={24} />
+              </button>
+            </div>
+            <form onSubmit={handleEnrollSubmit}>
+              <div className="p-8 space-y-6 max-h-[70vh] overflow-auto">
+                <div className="grid grid-cols-2 gap-8">
+                  <div className="space-y-4">
+                    <h3 className="text-xs uppercase tracking-widest font-bold text-emerald-600 border-b border-emerald-100 pb-2">Basic Info</h3>
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Full Name</label>
+                      <Input value={enrollData.name || ''} onChange={e => setEnrollData({...enrollData, name: e.target.value})} required />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Nickname</label>
+                        <Input value={enrollData.nickname || ''} onChange={e => setEnrollData({...enrollData, nickname: e.target.value})} />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Status</label>
+                        <Select value={enrollData.status || 'Study'} onChange={e => setEnrollData({...enrollData, status: e.target.value as any})}>
+                          <option value="Study">Study</option>
+                          <option value="Trial">Trial</option>
+                          <option value="Pending">Pending</option>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Gender</label>
+                        <Select value={enrollData.gender || 'Male'} onChange={e => setEnrollData({...enrollData, gender: e.target.value as any})}>
+                          <option value="Male">Male</option>
+                          <option value="Female">Female</option>
+                          <option value="Other">Other</option>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Birth Year</label>
+                        <Input type="number" value={enrollData.birthYear || ''} onChange={e => setEnrollData({...enrollData, birthYear: Number(e.target.value)})} />
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Phone Number</label>
+                      <Input value={enrollData.phone || ''} onChange={e => setEnrollData({...enrollData, phone: e.target.value})} required />
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <h3 className="text-xs uppercase tracking-widest font-bold text-emerald-600 border-b border-emerald-100 pb-2">Contact & Parent Info</h3>
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Email</label>
+                      <Input type="email" value={enrollData.email || ''} onChange={e => setEnrollData({...enrollData, email: e.target.value})} />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Address</label>
+                      <Input value={enrollData.school || ''} onChange={e => setEnrollData({...enrollData, school: e.target.value})} />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Parent Name</label>
+                        <Input value={enrollData.parentName || ''} onChange={e => setEnrollData({...enrollData, parentName: e.target.value})} />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Parent Phone</label>
+                        <Input value={enrollData.parentPhone || ''} onChange={e => setEnrollData({...enrollData, parentPhone: e.target.value})} />
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Note</label>
+                      <textarea 
+                        value={enrollData.note || ''} 
+                        onChange={e => setEnrollData({...enrollData, note: e.target.value})}
+                        className="w-full px-4 py-2 bg-white border border-black/10 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20 min-h-[80px]"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-4 pt-4 border-t border-black/5">
+                  <div className="flex justify-between items-center">
+                    <h3 className="text-xs uppercase tracking-widest font-bold text-emerald-600">Enrolled Classes</h3>
+                    <div className="w-64">
+                      <Select 
+                        value="" 
+                        onChange={e => {
+                          const classId = e.target.value;
+                          if (!classId) return;
+                          const current = enrollData.classIds || [];
+                          if (!current.includes(classId)) {
+                            setEnrollData({...enrollData, classIds: [...current, classId]});
+                          }
+                          e.target.value = "";
+                        }}
+                      >
+                        <option value="">Add to class...</option>
+                        {classes.filter(c => c.status === 'Active' && !enrollData.classIds?.includes(c.id))
+                          .map(c => <option key={c.id} value={c.id}>{c.name}</option>)
+                        }
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {enrollData.classIds?.map(id => {
+                      const cls = classes.find(c => c.id === id);
+                      return (
+                        <div key={id} className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-xl border border-emerald-100 text-xs font-bold">
+                          {cls?.name}
+                          <button type="button" onClick={() => setEnrollData({...enrollData, classIds: enrollData.classIds?.filter(cid => cid !== id)})}>
+                            <X size={14} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+              <div className="p-8 border-t border-black/5 flex gap-3">
+                <Button type="button" onClick={() => setEnrollingWaitlist(null)} className="flex-1 bg-black/5 hover:bg-black/10">Cancel</Button>
+                <Button type="submit" className="flex-1 bg-emerald-600 text-white hover:bg-emerald-700 shadow-lg shadow-emerald-500/20">Complete Enrollment</Button>
+              </div>
+            </form>
           </div>
         </div>
       )}

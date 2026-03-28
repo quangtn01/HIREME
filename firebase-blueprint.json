@@ -194,6 +194,24 @@
         "jobTitleIds": { "type": "array", "items": { "type": "string" }, "description": "List of authorized Job Title IDs" }
       },
       "required": ["pageId", "jobTitleIds"]
+    },
+    "WaitlistEntry": {
+      "title": "Waitlist Entry",
+      "description": "A potential student in the waitlist.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Student name" },
+        "phone": { "type": "string", "description": "Phone number" },
+        "source": { "type": "string", "enum": ["Direct", "Zalo", "Facebook", "Other"] },
+        "consultantId": { "type": "string", "description": "ID of the staff member (consultant)" },
+        "desiredClassId": { "type": "string", "description": "ID of the desired class" },
+        "referrerStaffId": { "type": "string", "description": "ID of the referring staff member" },
+        "consultationCount": { "type": "number", "description": "Number of consultation cycles" },
+        "status": { "type": "string", "enum": ["Waiting", "Enrolled", "Failed"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "notes": { "type": "string" }
+      },
+      "required": ["name", "phone", "source", "consultantId", "consultationCount", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -208,6 +226,7 @@
     "students": { "schema": "Student", "description": "Collection of students" },
     "tuitionRecords": { "schema": "TuitionRecord", "description": "Collection of tuition payment records" },
     "attendanceRecords": { "schema": "AttendanceRecord", "description": "Collection of attendance records" },
-    "permissions": { "schema": "Permission", "description": "Collection of page permissions" }
+    "permissions": { "schema": "Permission", "description": "Collection of page permissions" },
+    "waitlist": { "schema": "WaitlistEntry", "description": "Collection of potential students" }
   }
 }

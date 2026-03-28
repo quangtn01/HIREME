@@ -66,6 +66,11 @@ service cloud.firestore {
       allow read, write: if isAuthenticated();
     }
 
+    // Waitlist
+    match /waitlist/{entryId} {
+      allow read, write: if isAuthenticated();
+    }
+
     // Permissions
     match /permissions/{permissionId} {
       allow read, write: if isAuthenticated();

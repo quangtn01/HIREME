@@ -117,6 +117,20 @@ export interface TuitionRecord {
   note?: string;
 }
 
+export interface WaitlistEntry {
+  id: string;
+  name: string;
+  phone: string;
+  source: 'Direct' | 'Zalo' | 'Facebook' | 'Other';
+  referrerStaffId?: string; // NV...
+  consultantId: string; // NV... (Mandatory)
+  desiredClassId?: string;
+  consultationCount: 1 | 2 | 3;
+  status: 'Waiting' | 'Failed' | 'Enrolled';
+  notes?: string;
+  createdAt: string; // ISO
+}
+
 export interface AttendanceRecord {
   id: string;
   classId: string;
