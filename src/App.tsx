@@ -60,7 +60,9 @@ import {
   BarChart2,
   PieChart as PieChartIcon,
   Target,
-  TrendingUp
+  TrendingUp,
+  Bell,
+  Receipt
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -106,8 +108,17 @@ interface FirestoreErrorInfo {
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  
+  // If it's a "Document already exists" error during a create operation, 
+  // we can treat it as a non-fatal duplicate entry error.
+  if (errorMessage.includes('already exists') && operationType === OperationType.CREATE) {
+    console.warn('Duplicate entry detected in Firestore:', errorMessage);
+    return;
+  }
+
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errorMessage,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
@@ -443,6 +454,7 @@ const NAV_STRUCTURE = [
       { id: 'report-overview', label: 'Overview', icon: <Grid size={16} /> },
       { id: 'report-students', label: 'Students', icon: <Users size={16} /> },
       { id: 'report-revenue', label: 'Revenue', icon: <Briefcase size={16} /> },
+      { id: 'report-debt', label: 'Debt Report', icon: <AlertCircle size={16} /> },
     ]
   },
   {
@@ -4629,10 +4641,17 @@ function CourseView({ subTab, classes, programs, staff, campuses, jobTitles, stu
 
 function TuitionView({ classes, students, tuitionRecords }: { classes: Class[], students: Student[], tuitionRecords: TuitionRecord[] }) {
   const [selectedClassId, setSelectedClassId] = useState<string>('');
+  const [viewType, setViewType] = useState<'paid' | 'owed'>('paid');
   const [editingRecord, setEditingRecord] = useState<{ student: Student, month: string, record?: TuitionRecord } | null>(null);
   const [paymentDate, setPaymentDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
   const [amount, setAmount] = useState<string>('');
+  const [owedAmount, setOwedAmount] = useState<string>('');
   const [note, setNote] = useState<string>('');
+  const [saving, setSaving] = useState(false);
+  const [showNotificationModal, setShowNotificationModal] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [selectedStudentForAction, setSelectedStudentForAction] = useState<Student | null>(null);
+  const [paymentAmount, setPaymentAmount] = useState<string>('');
 
   const activeClasses = classes.filter(c => c.status === 'Active').sort((a, b) => a.name.localeCompare(b.name));
   const selectedClass = classes.find(c => c.id === selectedClassId);
@@ -4655,32 +4674,60 @@ function TuitionView({ classes, students, tuitionRecords }: { classes: Class[], 
   }, [selectedClass]);
 
   const handleSave = async () => {
-    if (!editingRecord) return;
+    if (!editingRecord || saving) return;
     const { student, month, record } = editingRecord;
     
     const cleanAmount = amount.trim().toUpperCase();
-    if (cleanAmount !== 'DONE' && isNaN(Number(cleanAmount))) {
+    if (viewType === 'paid' && cleanAmount !== 'DONE' && isNaN(Number(cleanAmount))) {
+      return;
+    }
+    if (viewType === 'owed' && isNaN(Number(owedAmount))) {
       return;
     }
 
-    const data = {
+    setSaving(true);
+
+    const data: any = {
       studentId: student.id,
       classId: selectedClassId,
       month,
       paymentDate,
-      amount: cleanAmount === 'DONE' ? 'DONE' : Number(cleanAmount),
       note
     };
 
+    if (viewType === 'paid') {
+      data.amount = cleanAmount === 'DONE' ? 'DONE' : Number(cleanAmount);
+      if (cleanAmount === 'DONE') {
+        data.owedAmount = 0;
+      }
+    } else {
+      data.owedAmount = Number(owedAmount);
+    }
+
     try {
-      if (record) {
-        await updateDoc(doc(db, 'tuitionRecords', record.id), data);
+      // Robust check for existing record to prevent duplicates/errors
+      const existingRecord = tuitionRecords.find(r => 
+        r.studentId === student.id && 
+        r.classId === selectedClassId && 
+        r.month === month
+      );
+
+      const finalRecord = record || existingRecord;
+
+      if (finalRecord) {
+        await updateDoc(doc(db, 'tuitionRecords', finalRecord.id), data);
       } else {
+        // If creating from owed view, we need to set a default amount (0)
+        if (viewType === 'owed') {
+          data.amount = 0;
+        }
         await addDoc(collection(db, 'tuitionRecords'), data);
       }
       setEditingRecord(null);
     } catch (err) {
-      handleFirestoreError(err, record ? OperationType.UPDATE : OperationType.CREATE, 'tuitionRecords');
+      handleFirestoreError(err, (record || tuitionRecords.find(r => r.studentId === student.id && r.classId === selectedClassId && r.month === month)) ? OperationType.UPDATE : OperationType.CREATE, 'tuitionRecords');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -4691,6 +4738,89 @@ function TuitionView({ classes, students, tuitionRecords }: { classes: Class[], 
       setEditingRecord(null);
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, 'tuitionRecords');
+    }
+  };
+
+  const handleBulkPayment = async () => {
+    if (!selectedStudentForAction || !paymentAmount || isNaN(Number(paymentAmount)) || saving) return;
+    
+    setSaving(true);
+    const amountToDistribute = Number(paymentAmount);
+    let remaining = amountToDistribute;
+    const batch = writeBatch(db);
+    const currentMonth = format(new Date(), 'yyyy-MM');
+    
+    // 1. Get all records for this student and class
+    const studentRecords = tuitionRecords.filter(r => 
+      r.studentId === selectedStudentForAction.id && 
+      r.classId === selectedClassId
+    );
+    
+    // 2. Sort by month (oldest first)
+    const sortedMonths = [...months].sort();
+    
+    for (const m of sortedMonths) {
+      if (remaining <= 0) break;
+      
+      const record = studentRecords.find(r => r.month === m);
+      const owed = record?.owedAmount || 0;
+      
+      if (owed > 0) {
+        const paymentForThisMonth = Math.min(remaining, owed);
+        const currentPaid = typeof record?.amount === 'number' ? record.amount : 0;
+        
+        const data = {
+          studentId: selectedStudentForAction.id,
+          classId: selectedClassId,
+          month: m,
+          amount: currentPaid + paymentForThisMonth,
+          owedAmount: owed - paymentForThisMonth,
+          paymentDate: format(new Date(), 'yyyy-MM-dd'),
+          note: record?.note || 'Bulk payment'
+        };
+        
+        if (record) {
+          batch.update(doc(db, 'tuitionRecords', record.id), data);
+        } else {
+          const newRef = doc(collection(db, 'tuitionRecords'));
+          batch.set(newRef, data);
+        }
+        
+        remaining -= paymentForThisMonth;
+      }
+    }
+    
+    // 3. If there's still remaining amount, add it to the current month's paid amount
+    if (remaining > 0) {
+      const record = studentRecords.find(r => r.month === currentMonth);
+      const currentPaid = typeof record?.amount === 'number' ? record.amount : 0;
+      
+      const data = {
+        studentId: selectedStudentForAction.id,
+        classId: selectedClassId,
+        month: currentMonth,
+        amount: currentPaid + remaining,
+        owedAmount: record?.owedAmount || 0,
+        paymentDate: format(new Date(), 'yyyy-MM-dd'),
+        note: record?.note || 'Bulk payment surplus'
+      };
+      
+      if (record) {
+        batch.update(doc(db, 'tuitionRecords', record.id), data);
+      } else {
+        const newRef = doc(collection(db, 'tuitionRecords'));
+        batch.set(newRef, data);
+      }
+    }
+    
+    try {
+      await batch.commit();
+      setShowPaymentModal(false);
+      setSelectedStudentForAction(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'tuitionRecords');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -4706,6 +4836,26 @@ function TuitionView({ classes, students, tuitionRecords }: { classes: Class[], 
             <option value="">Select Active Class</option>
             {activeClasses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </Select>
+          <div className="flex bg-black/5 p-1 rounded-xl">
+            <button
+              onClick={() => setViewType('paid')}
+              className={cn(
+                "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                viewType === 'paid' ? "bg-white shadow-sm text-emerald-600" : "text-black/40 hover:text-black/60"
+              )}
+            >
+              Paid Fees
+            </button>
+            <button
+              onClick={() => setViewType('owed')}
+              className={cn(
+                "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                viewType === 'owed' ? "bg-white shadow-sm text-red-600" : "text-black/40 hover:text-black/60"
+              )}
+            >
+              Owed Fees
+            </button>
+          </div>
         </div>
       </div>
 
@@ -4719,6 +4869,7 @@ function TuitionView({ classes, students, tuitionRecords }: { classes: Class[], 
                 <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Status</th>
                 <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Phone</th>
                 <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5">Note</th>
+                <th className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5 text-center min-w-[100px] bg-gray-50">Total</th>
                 {months.map(m => (
                   <th key={m} className="p-4 text-[10px] font-bold uppercase tracking-widest text-black/40 border-b border-black/5 text-center min-w-[120px]">
                     {format(parseISO(m + '-01'), 'MMM yyyy')}
@@ -4727,51 +4878,116 @@ function TuitionView({ classes, students, tuitionRecords }: { classes: Class[], 
               </tr>
             </thead>
             <tbody className="divide-y divide-black/5">
-              {classStudents.map((s, idx) => (
-                <tr key={s.id} className="hover:bg-black/[0.02] transition-colors group">
-                  <td className="p-4 text-sm font-mono text-black/30 sticky left-0 z-10 bg-white group-hover:bg-gray-50 border-r border-black/5">{idx + 1}</td>
-                  <td className="p-4 text-sm font-bold sticky left-12 z-10 bg-white group-hover:bg-gray-50 border-r border-black/5">{s.name}</td>
-                  <td className="p-4 text-xs">
-                    <span className={cn(
-                      "px-2 py-0.5 rounded-full font-bold uppercase tracking-tighter",
-                      s.status === 'Study' ? "bg-emerald-100 text-emerald-600" : "bg-gray-100 text-gray-400"
-                    )}>
-                      {s.status}
-                    </span>
-                  </td>
-                  <td className="p-4 text-sm">{s.phone || '-'}</td>
-                  <td className="p-4 text-sm truncate max-w-[150px]">{s.note || '-'}</td>
-                  {months.map(m => {
-                    const record = tuitionRecords.find(r => r.studentId === s.id && r.classId === selectedClassId && r.month === m);
-                    return (
-                      <td 
-                        key={m} 
-                        onDoubleClick={() => {
-                          setEditingRecord({ student: s, month: m, record });
-                          setPaymentDate(record?.paymentDate || format(new Date(), 'yyyy-MM-dd'));
-                          setAmount(record?.amount?.toString() || '');
-                          setNote(record?.note || '');
-                        }}
-                        className="p-4 text-sm text-center cursor-pointer hover:bg-emerald-50/50 transition-colors border-l border-black/5"
-                      >
-                        {record ? (
-                          <div className="flex flex-col items-center">
-                            <span className={cn(
-                              "font-bold",
-                              record.amount === 'DONE' ? "text-blue-600" : "text-emerald-600"
-                            )}>
-                              {record.amount === 'DONE' ? 'DONE' : new Intl.NumberFormat('vi-VN').format(record.amount as number)}
-                            </span>
-                            <span className="text-[9px] text-black/30">{safeFormat(record.paymentDate)}</span>
+              {classStudents.map((s, idx) => {
+                const studentRecords = tuitionRecords.filter(r => r.studentId === s.id && r.classId === selectedClassId);
+                const totalAmount = studentRecords.reduce((sum, r) => sum + (typeof r.amount === 'number' ? r.amount : 0), 0);
+                const totalOwed = studentRecords.reduce((sum, r) => sum + (r.owedAmount || 0), 0);
+
+                return (
+                  <tr key={s.id} className="hover:bg-black/[0.02] transition-colors group">
+                    <td className="p-4 text-sm font-mono text-black/30 sticky left-0 z-10 bg-white group-hover:bg-gray-50 border-r border-black/5">{idx + 1}</td>
+                    <td className="p-4 text-sm font-bold sticky left-12 z-10 bg-white group-hover:bg-gray-50 border-r border-black/5">{s.name}</td>
+                    <td className="p-4 text-xs">
+                      <span className={cn(
+                        "px-2 py-0.5 rounded-full font-bold uppercase tracking-tighter",
+                        s.status === 'Study' ? "bg-emerald-100 text-emerald-600" : "bg-gray-100 text-gray-400"
+                      )}>
+                        {s.status}
+                      </span>
+                    </td>
+                    <td className="p-4 text-sm">{s.phone || '-'}</td>
+                    <td className="p-4 text-sm truncate max-w-[150px]">{s.note || '-'}</td>
+                    <td className="p-4 text-sm text-center font-bold bg-gray-50/30">
+                      {viewType === 'paid' ? (
+                        <span className="text-emerald-600">{new Intl.NumberFormat('vi-VN').format(totalAmount)}</span>
+                      ) : (
+                        <div className="flex flex-col items-center gap-2">
+                          <span className="text-red-600">{new Intl.NumberFormat('vi-VN').format(totalOwed)}</span>
+                          <div className="flex flex-col gap-1 w-full">
+                            <button 
+                              onClick={() => {
+                                setSelectedStudentForAction(s);
+                                setShowNotificationModal(true);
+                              }}
+                              className="text-[10px] bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100 transition-colors flex items-center justify-center gap-1"
+                            >
+                              <Bell size={10} /> Báo học phí
+                            </button>
+                            <button 
+                              onClick={() => {
+                                setSelectedStudentForAction(s);
+                                setPaymentAmount('');
+                                setShowPaymentModal(true);
+                              }}
+                              className="text-[10px] bg-emerald-50 text-emerald-600 px-2 py-1 rounded hover:bg-emerald-100 transition-colors flex items-center justify-center gap-1"
+                            >
+                              <Receipt size={10} /> Nộp học phí
+                            </button>
                           </div>
-                        ) : (
-                          <span className="text-black/10 italic text-xs">-</span>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
+                        </div>
+                      )}
+                    </td>
+                    {months.map(m => {
+                      const record = studentRecords.find(r => r.month === m);
+                      const isDone = record?.amount === 'DONE';
+                      
+                      return (
+                        <td 
+                          key={m} 
+                          onDoubleClick={() => {
+                            if (viewType === 'owed' && isDone) return;
+                            setEditingRecord({ student: s, month: m, record });
+                            setPaymentDate(record?.paymentDate || format(new Date(), 'yyyy-MM-dd'));
+                            setAmount(record?.amount?.toString() || '');
+                            setOwedAmount(record?.owedAmount?.toString() || '');
+                            setNote(record?.note || '');
+                          }}
+                          className={cn(
+                            "p-4 text-sm text-center cursor-pointer transition-colors border-l border-black/5",
+                            viewType === 'paid' ? "hover:bg-emerald-50/50" : "hover:bg-red-50/50",
+                            viewType === 'owed' && isDone && "cursor-not-allowed opacity-50 bg-black/[0.02]"
+                          )}
+                        >
+                          {viewType === 'paid' ? (
+                            record ? (
+                              <div className="flex flex-col items-center">
+                                <span className={cn(
+                                  "font-bold",
+                                  isDone ? "text-blue-600" : "text-emerald-600"
+                                )}>
+                                  {isDone ? 'DONE' : new Intl.NumberFormat('vi-VN').format(record.amount as number)}
+                                </span>
+                                {record.owedAmount && record.owedAmount > 0 ? (
+                                  <span className="text-[9px] text-red-600 font-bold">Owed: {new Intl.NumberFormat('vi-VN').format(record.owedAmount)}</span>
+                                ) : (
+                                  <span className="text-[9px] text-black/30">{safeFormat(record.paymentDate)}</span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-black/10 italic text-xs">-</span>
+                            )
+                          ) : (
+                            record ? (
+                              <div className="flex flex-col items-center">
+                                <span className="font-bold text-red-600 text-lg">
+                                  {new Intl.NumberFormat('vi-VN').format(record.owedAmount || 0)}
+                                </span>
+                                {record.amount !== 0 && (
+                                  <span className="text-[9px] text-emerald-600 font-bold">
+                                    Paid: {isDone ? 'DONE' : new Intl.NumberFormat('vi-VN').format(record.amount as number)}
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-black/10 italic text-xs">-</span>
+                            )
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         ) : (
@@ -4782,11 +4998,123 @@ function TuitionView({ classes, students, tuitionRecords }: { classes: Class[], 
         )}
       </div>
 
+      {/* Notification Modal */}
+      {showNotificationModal && selectedStudentForAction && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/20 backdrop-blur-sm">
+          <div className="bg-white rounded-[32px] shadow-2xl border border-black/5 w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-6 border-b border-black/5 bg-blue-50/50">
+              <h2 className="text-xl font-bold text-blue-900">Thông báo học phí</h2>
+              <p className="text-xs text-blue-600/60 font-medium">Trung Tâm Ngoại Ngữ Hireme</p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[9px] uppercase font-bold text-black/30 tracking-widest block mb-0.5">Học viên</label>
+                  <p className="font-bold text-base">{selectedStudentForAction.name}</p>
+                </div>
+                <div>
+                  <label className="text-[9px] uppercase font-bold text-black/30 tracking-widest block mb-0.5">Lớp</label>
+                  <p className="font-bold text-base">{selectedClass?.name}</p>
+                </div>
+              </div>
+
+              <div className="bg-gray-50 rounded-xl p-4 space-y-2">
+                {(() => {
+                  const currentMonth = format(new Date(), 'yyyy-MM');
+                  const studentRecords = tuitionRecords.filter(r => r.studentId === selectedStudentForAction.id && r.classId === selectedClassId);
+                  const currentMonthRecord = studentRecords.find(r => r.month === currentMonth);
+                  const previousDebt = studentRecords
+                    .filter(r => r.month < currentMonth)
+                    .reduce((sum, r) => sum + (r.owedAmount || 0), 0);
+                  const currentOwed = currentMonthRecord?.owedAmount || 0;
+                  const total = currentOwed + previousDebt;
+                  const transferContent = `${selectedStudentForAction.name} - ${selectedClass?.name}`;
+                  const qrUrl = `https://img.vietqr.io/image/vietcombank-0081001333974-compact.png?amount=${total}&addInfo=${encodeURIComponent(transferContent)}&accountName=Trung%20Tam%20Ngoai%20Ngu%20Hireme`;
+
+                  return (
+                    <>
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-black/40">Học phí tháng này ({format(new Date(), 'MM/yyyy')}):</span>
+                        <span className="font-bold">{new Intl.NumberFormat('vi-VN').format(currentOwed)} đ</span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-black/40">Nợ cũ:</span>
+                        <span className="font-bold text-red-600">{new Intl.NumberFormat('vi-VN').format(previousDebt)} đ</span>
+                      </div>
+                      <div className="h-px bg-black/5 my-1" />
+                      <div className="flex justify-between items-center">
+                        <span className="font-bold text-base">Tổng cộng:</span>
+                        <span className="font-bold text-xl text-blue-600">{new Intl.NumberFormat('vi-VN').format(total)} đ</span>
+                      </div>
+
+                      <div className="mt-4 pt-4 border-t border-black/5 space-y-3">
+                        <div className="text-center space-y-1">
+                          <p className="text-[9px] uppercase font-bold text-black/30 tracking-widest">Thông tin chuyển khoản</p>
+                          <p className="text-sm font-bold text-blue-900">Vietcombank: 0081001333974</p>
+                          <p className="text-[10px] text-black/60 uppercase font-medium">Trung Tâm Ngoại Ngữ Hireme</p>
+                          <p className="text-xs bg-blue-50 text-blue-700 py-1.5 px-3 rounded-lg font-mono inline-block">
+                            Nội dung: {transferContent}
+                          </p>
+                        </div>
+                        <div className="flex justify-center">
+                          <img 
+                            src={qrUrl} 
+                            alt="QR Code Chuyển khoản" 
+                            className="w-32 h-32 rounded-lg shadow-md border border-black/5"
+                            referrerPolicy="no-referrer"
+                          />
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+            <div className="p-6 border-t border-black/5">
+              <Button onClick={() => setShowNotificationModal(false)} className="w-full bg-black text-white hover:bg-black/80 h-10 rounded-xl">Đóng</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Payment Modal */}
+      {showPaymentModal && selectedStudentForAction && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/20 backdrop-blur-sm">
+          <div className="bg-white rounded-[40px] shadow-2xl border border-black/5 w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-8 border-b border-black/5 bg-emerald-50/50">
+              <h2 className="text-2xl font-bold text-emerald-900">Nộp học phí</h2>
+              <p className="text-sm text-emerald-600/60 font-medium">{selectedStudentForAction.name}</p>
+            </div>
+            <div className="p-8 space-y-6">
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Số tiền nộp</label>
+                <Input 
+                  type="number"
+                  value={paymentAmount} 
+                  onChange={e => setPaymentAmount(e.target.value)} 
+                  placeholder="Nhập số tiền học viên nộp"
+                  autoFocus
+                />
+                <p className="text-[10px] text-black/30 mt-2 italic">
+                  * Số tiền sẽ được tự động trừ vào các tháng nợ từ cũ đến mới.
+                </p>
+              </div>
+            </div>
+            <div className="p-8 border-t border-black/5 flex gap-3">
+              <Button onClick={() => setShowPaymentModal(false)} disabled={saving} className="flex-1 bg-black/5 hover:bg-black/10">Hủy</Button>
+              <Button onClick={handleBulkPayment} disabled={saving} className="flex-1 bg-emerald-600 text-white hover:bg-emerald-700">
+                {saving ? 'Đang xử lý...' : 'Xác nhận nộp'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {editingRecord && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/20 backdrop-blur-sm">
           <div className="bg-white rounded-[40px] shadow-2xl border border-black/5 w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
             <div className="p-8 border-b border-black/5 bg-gray-50/50">
-              <h2 className="text-2xl font-bold">Tuition Payment</h2>
+              <h2 className="text-2xl font-bold">{viewType === 'paid' ? 'Tuition Payment' : 'Owed Tuition'}</h2>
               <p className="text-sm text-black/40 font-medium">{format(parseISO(editingRecord.month + '-01'), 'MMMM yyyy')}</p>
             </div>
             <div className="p-8 space-y-6">
@@ -4805,22 +5133,38 @@ function TuitionView({ classes, students, tuitionRecords }: { classes: Class[], 
                   <label className="text-[10px] uppercase font-bold text-black/30 tracking-widest block mb-1">Student Name</label>
                   <p className="font-bold">{editingRecord.student.name}</p>
                 </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Payment Date</label>
-                  <Input 
-                    type="date"
-                    value={paymentDate} 
-                    onChange={e => setPaymentDate(e.target.value)} 
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Amount (Number or 'DONE')</label>
-                  <Input 
-                    value={amount} 
-                    onChange={e => setAmount(e.target.value)} 
-                    placeholder="e.g. 500000 or DONE"
-                  />
-                </div>
+                
+                {viewType === 'paid' ? (
+                  <>
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Payment Date</label>
+                      <Input 
+                        type="date"
+                        value={paymentDate} 
+                        onChange={e => setPaymentDate(e.target.value)} 
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Amount (Number or 'DONE')</label>
+                      <Input 
+                        value={amount} 
+                        onChange={e => setAmount(e.target.value)} 
+                        placeholder="e.g. 500000 or DONE"
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Owed Amount</label>
+                    <Input 
+                      type="number"
+                      value={owedAmount} 
+                      onChange={e => setOwedAmount(e.target.value)} 
+                      placeholder="e.g. 200000"
+                    />
+                  </div>
+                )}
+                
                 <div className="space-y-1">
                   <label className="text-[10px] uppercase font-bold text-black/40 ml-1">Note</label>
                   <Input 
@@ -4833,11 +5177,13 @@ function TuitionView({ classes, students, tuitionRecords }: { classes: Class[], 
             </div>
             <div className="p-8 border-t border-black/5 flex flex-col gap-3">
               <div className="flex gap-3">
-                <Button onClick={() => setEditingRecord(null)} className="flex-1 bg-black/5 hover:bg-black/10">Cancel</Button>
-                <Button onClick={handleSave} className="flex-1 bg-emerald-600 text-white hover:bg-emerald-700">Save</Button>
+                <Button onClick={() => setEditingRecord(null)} disabled={saving} className="flex-1 bg-black/5 hover:bg-black/10">Cancel</Button>
+                <Button onClick={handleSave} disabled={saving} className="flex-1 bg-emerald-600 text-white hover:bg-emerald-700">
+                  {saving ? 'Saving...' : 'Save'}
+                </Button>
               </div>
               {editingRecord.record && (
-                <Button onClick={handleDelete} className="w-full bg-red-50 text-red-600 hover:bg-red-100 border-red-100">Delete Record</Button>
+                <Button onClick={handleDelete} disabled={saving} className="w-full bg-red-50 text-red-600 hover:bg-red-100 border-red-100">Delete Record</Button>
               )}
             </div>
           </div>
@@ -5489,16 +5835,15 @@ function OfficerView({
   const [filterMonth, setFilterMonth] = useState<string>('all');
   const [filterConsultationCycle, setFilterConsultationCycle] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('Waiting');
-  const [filterConsultantId, setFilterConsultantId] = useState<string>(
-    subTab === 'waitlist' && currentUserStaff ? currentUserStaff.id : 'all'
-  );
+  const [filterConsultantId, setFilterConsultantId] = useState<string>('all');
   const [filterProgramId, setFilterProgramId] = useState<string>('all');
 
   useEffect(() => {
-    if (subTab === 'waitlist' && currentUserStaff) {
-      setFilterConsultantId(currentUserStaff.id);
-    } else if (subTab === 'waitlistall') {
+    if (subTab === 'waitlistall') {
       setFilterStatus('Waiting');
+      setFilterConsultantId('all');
+    } else if (subTab === 'waitlist') {
+      setFilterConsultantId(currentUserStaff?.id || 'all');
     }
   }, [subTab, currentUserStaff]);
 
@@ -5706,11 +6051,8 @@ function OfficerView({
           <select 
             value={filterConsultantId} 
             onChange={(e) => setFilterConsultantId(e.target.value)}
-            disabled={subTab === 'waitlist' && !!currentUserStaff}
-            className={cn(
-              "w-full bg-black/[0.02] border-none rounded-xl text-sm p-3",
-              subTab === 'waitlist' && currentUserStaff && "opacity-50 cursor-not-allowed"
-            )}
+            disabled={subTab === 'waitlist'}
+            className="w-full bg-black/[0.02] border-none rounded-xl text-sm p-3 disabled:opacity-50"
           >
             <option value="all">All Consultants</option>
             {consultants.map(c => (
@@ -6126,7 +6468,7 @@ function ReportView({
   departments,
   programs
 }: { 
-  subTab: 'overview' | 'students' | 'revenue',
+  subTab: 'overview' | 'students' | 'revenue' | 'debt',
   students: Student[],
   classes: Class[],
   tuitionRecords: TuitionRecord[],
@@ -6431,6 +6773,115 @@ function ReportView({
                       </tr>
                     );
                   })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {subTab === 'debt' && (
+        <div className="space-y-8">
+          {/* Summary Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-white p-6 rounded-[32px] border border-black/5 shadow-sm">
+              <p className="text-[10px] uppercase font-bold text-black/40 mb-1">Total Debt</p>
+              <p className="text-3xl font-serif italic text-red-600">
+                {tuitionRecords.reduce((sum, r) => sum + (r.owedAmount || 0), 0).toLocaleString()}
+              </p>
+              <p className="text-xs text-black/40 mt-2 font-medium">VND</p>
+            </div>
+            <div className="bg-white p-6 rounded-[32px] border border-black/5 shadow-sm">
+              <p className="text-[10px] uppercase font-bold text-black/40 mb-1">Indebted Students</p>
+              <p className="text-3xl font-serif italic">
+                {new Set(tuitionRecords.filter(r => (r.owedAmount || 0) > 0).map(r => r.studentId)).size}
+              </p>
+              <p className="text-xs text-black/40 mt-2 font-medium">Students with outstanding debt</p>
+            </div>
+            <div className="bg-white p-6 rounded-[32px] border border-black/5 shadow-sm">
+              <p className="text-[10px] uppercase font-bold text-black/40 mb-1">Debt Records</p>
+              <p className="text-3xl font-serif italic">
+                {tuitionRecords.filter(r => (r.owedAmount || 0) > 0).length}
+              </p>
+              <p className="text-xs text-black/40 mt-2 font-medium">Unpaid month records</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            {/* Debt by Month */}
+            <div className="bg-white p-8 rounded-[40px] border border-black/5 shadow-sm">
+              <h3 className="text-lg font-bold mb-6">Debt by Month</h3>
+              <div className="h-[300px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={(() => {
+                    const months = Array.from(new Set(tuitionRecords.map(r => r.month))).sort();
+                    return months.map(month => ({
+                      month,
+                      debt: tuitionRecords.filter(r => r.month === month).reduce((sum, r) => sum + (r.owedAmount || 0), 0)
+                    })).filter(d => d.debt > 0).slice(-6);
+                  })()}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#00000005" />
+                    <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{fontSize: 10}} />
+                    <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10}} tickFormatter={(v) => `${(v/1000000).toFixed(1)}M`} />
+                    <Tooltip formatter={(v: number) => [v.toLocaleString() + ' VND', 'Debt']} />
+                    <Bar dataKey="debt" fill="#ef4444" radius={[10, 10, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Debt by Class */}
+            <div className="bg-white p-8 rounded-[40px] border border-black/5 shadow-sm">
+              <h3 className="text-lg font-bold mb-6">Debt by Class</h3>
+              <div className="h-[300px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={classes.map(c => ({
+                    name: c.name,
+                    debt: tuitionRecords.filter(r => r.classId === c.id).reduce((sum, r) => sum + (r.owedAmount || 0), 0)
+                  })).filter(c => c.debt > 0).sort((a, b) => b.debt - a.debt).slice(0, 10)} layout="vertical">
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#00000005" />
+                    <XAxis type="number" hide />
+                    <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{fontSize: 10}} width={100} />
+                    <Tooltip formatter={(v: number) => [v.toLocaleString() + ' VND', 'Debt']} />
+                    <Bar dataKey="debt" fill="#f59e0b" radius={[0, 10, 10, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+
+          {/* Top Indebted Students */}
+          <div className="bg-white p-8 rounded-[40px] border border-black/5 shadow-sm">
+            <h3 className="text-lg font-bold mb-6">Top 10 Indebted Students</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-black/5">
+                    <th className="p-4 text-[10px] uppercase font-bold text-black/40">Student Name</th>
+                    <th className="p-4 text-[10px] uppercase font-bold text-black/40">Total Debt (VND)</th>
+                    <th className="p-4 text-[10px] uppercase font-bold text-black/40">Months Owed</th>
+                    <th className="p-4 text-[10px] uppercase font-bold text-black/40">Latest Month</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-black/[0.02]">
+                  {(() => {
+                    const studentDebts = students.map(s => {
+                      const records = tuitionRecords.filter(r => r.studentId === s.id);
+                      const totalDebt = records.reduce((sum, r) => sum + (r.owedAmount || 0), 0);
+                      const monthsOwed = records.filter(r => (r.owedAmount || 0) > 0).length;
+                      const latestMonth = records.filter(r => (r.owedAmount || 0) > 0).sort((a, b) => b.month.localeCompare(a.month))[0]?.month || '-';
+                      return { name: s.name, totalDebt, monthsOwed, latestMonth };
+                    }).filter(s => s.totalDebt > 0).sort((a, b) => b.totalDebt - a.totalDebt).slice(0, 10);
+
+                    return studentDebts.map(s => (
+                      <tr key={s.name} className="hover:bg-black/[0.01] transition-colors">
+                        <td className="p-4 font-bold text-sm">{s.name}</td>
+                        <td className="p-4 font-mono text-sm text-red-600 font-bold">{s.totalDebt.toLocaleString()}</td>
+                        <td className="p-4 text-sm text-black/60">{s.monthsOwed}</td>
+                        <td className="p-4 text-sm text-black/60">{s.latestMonth}</td>
+                      </tr>
+                    ));
+                  })()}
                 </tbody>
               </table>
             </div>

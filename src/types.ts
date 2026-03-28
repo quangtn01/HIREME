@@ -114,6 +114,7 @@ export interface TuitionRecord {
   month: string; // YYYY-MM
   paymentDate: string; // YYYY-MM-DD
   amount: number | 'DONE';
+  owedAmount?: number;
   note?: string;
 }
 
